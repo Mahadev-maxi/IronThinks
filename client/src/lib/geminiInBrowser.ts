@@ -517,6 +517,40 @@ async function callOpenAIApi({
   return null;
 }
 
+// ----------------------------------------------------
+// Google Gemini Model Health & Cooldown Circuit Breaker
+// ----------------------------------------------------
+let preferredGeminiModel: string = 'gemini-3.5-flash-lite';
+const geminiModelCooldownMap = new Map<string, number>();
+
+export const ALL_GEMINI_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
+  'gemini-3.1-pro',
+  'gemini-pro-latest',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash'
+];
+
+function getPrioritizedGeminiModels(): string[] {
+  const now = Date.now();
+  // Filter out any models currently cooling down due to 503 / 429
+  const available = ALL_GEMINI_MODELS.filter((m) => {
+    const cooldownUntil = geminiModelCooldownMap.get(m);
+    return !cooldownUntil || now > cooldownUntil;
+  });
+
+  const list = available.length > 0 ? available : [...ALL_GEMINI_MODELS];
+  // Ensure the preferred working model is at the very front
+  if (list.includes(preferredGeminiModel)) {
+    return [preferredGeminiModel, ...list.filter((m) => m !== preferredGeminiModel)];
+  }
+  return list;
+}
+
 /**
  * Calls Google Gemini REST API directly from the browser.
  */
@@ -533,17 +567,7 @@ async function callGeminiFlashApi({
   history: TranscriptEntry[];
   sessionId: string;
 }): Promise<AgentGeneratedResult | null> {
-  const models = [
-    'gemini-3.8-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.5-flash',
-    'gemini-3.1-flash-lite',
-    'gemini-flash-latest',
-    'gemini-3.1-pro',
-    'gemini-pro-latest',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash'
-  ];
+  const models = getPrioritizedGeminiModels();
   const formattedContents = formatContentsForGemini(history, userText);
 
   const functionDeclarations = persona.tools?.map((t) => ({
@@ -582,14 +606,14 @@ async function callGeminiFlashApi({
       });
 
       if (!res.ok) {
-        if (res.status === 503) {
-          console.info(`[GeminiInBrowser] Model ${model} is experiencing temporary high demand (HTTP 503). Auto-switching to alternate model...`);
-          await new Promise((r) => setTimeout(r, 250));
-        } else if (res.status === 429) {
-          console.info(`[GeminiInBrowser] Model ${model} rate-limited (HTTP 429). Switching to alternate model...`);
-          await new Promise((r) => setTimeout(r, 250));
+        if (res.status === 503 || res.status === 429) {
+          // Place this model in cooldown for 10 minutes so no future requests generate red console errors
+          geminiModelCooldownMap.set(model, Date.now() + 10 * 60 * 1000);
+          console.info(`[GeminiInBrowser] Model ${model} is experiencing load (${res.status}). Cooldown registered; switching to alternate model...`);
+          await new Promise((r) => setTimeout(r, 200));
         } else if (res.status === 404) {
-          console.info(`[GeminiInBrowser] Model ${model} unavailable (HTTP 404), checking next model...`);
+          geminiModelCooldownMap.set(model, Date.now() + 60 * 60 * 1000);
+          console.info(`[GeminiInBrowser] Model ${model} unavailable (404), marked in cooldown...`);
         } else {
           const errorText = await res.text().catch(() => '');
           console.info(`[GeminiInBrowser] Model ${model} returned HTTP ${res.status}:`, errorText);
@@ -601,6 +625,10 @@ async function callGeminiFlashApi({
       const candidatePart = data.candidates?.[0]?.content?.parts?.[0];
 
       if (!candidatePart) continue;
+
+      // Update preferred model so all future voice turns call this working model directly without any failed attempts
+      preferredGeminiModel = model;
+      geminiModelCooldownMap.delete(model);
 
       if (candidatePart.functionCall) {
         const { name: toolName, args: toolArgs } = candidatePart.functionCall;
