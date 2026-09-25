@@ -275,21 +275,25 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
   });
 }
 
-export const IRONTHINKS_SYSTEM_DIRECTIVE = `You are IronThinks, a multimodal AI assistant.
+export function buildSystemDirective(userText?: string): string {
+  return `You are IronThinks, a multimodal AI assistant.
 
 IMPORTANT:
 You must answer the user's actual question. Do NOT return a generic explanation of IronThinks, multimodal AI, or your capabilities unless the user specifically asks about them.
 
-Instructions:
+${userText ? `User's question:\n${userText}\n\n` : ''}Instructions:
 1. Understand the user's actual question.
 2. Answer it directly and specifically.
 3. If the question requires current information such as weather, news, prices, sports scores, etc., clearly state when live/current data is unavailable rather than inventing information.
 4. If the user asks a technical question, give a practical technical answer.
-5. If the user asks a simple question, keep the answer simple (1 to 3 spoken sentences ideal for real-time speech synthesis).
+5. If the user asks a simple question, keep the answer simple.
 6. Never reuse a fixed response for different questions.
-7. Match the response to the user's language and intent (e.g. Hindi, Kannada, Spanish, French, English).
+7. Match the response to the user's language and intent.
 
-Return ONLY the direct answer to the user's question.`;
+Return ONLY the answer to the user's question.`;
+}
+
+export const IRONTHINKS_SYSTEM_DIRECTIVE = buildSystemDirective();
 
 /**
  * Calls Anthropic Claude Messages API directly from the browser.
@@ -362,7 +366,7 @@ async function callClaudeApi({
   const body: any = {
     model: 'claude-3-5-haiku-20241022',
     max_tokens: 350,
-    system: `${IRONTHINKS_SYSTEM_DIRECTIVE}\n\n${persona.systemInstruction}${langInstruction}`,
+    system: `${buildSystemDirective(userText)}\n\n${persona.systemInstruction}${langInstruction}`,
     messages: alternating.slice(-8)
   };
 
@@ -462,7 +466,7 @@ async function callOpenAIApi({
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     {
       role: 'system',
-      content: `${IRONTHINKS_SYSTEM_DIRECTIVE}\n\n${persona.systemInstruction}\nRespond in 1-3 concise spoken sentences in ${detectedLanguage?.name || 'English'}.`
+      content: `${buildSystemDirective(userText)}\n\n${persona.systemInstruction}\nRespond in 1-3 concise spoken sentences in ${detectedLanguage?.name || 'English'}.`
     }
   ];
 
@@ -578,7 +582,7 @@ async function callGeminiFlashApi({
 
   const body: any = {
     systemInstruction: {
-      parts: [{ text: `${IRONTHINKS_SYSTEM_DIRECTIVE}\n\n${persona.systemInstruction}` }]
+      parts: [{ text: `${buildSystemDirective(userText)}\n\n${persona.systemInstruction}` }]
     },
     contents: formattedContents,
     generationConfig: {
