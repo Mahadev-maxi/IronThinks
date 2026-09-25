@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Mic, Camera, Sliders, CheckCircle2, Shield, Radio, Key, Sparkles, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Settings, Mic, Camera, Sliders, CheckCircle2, Shield, Radio, Key, Sparkles, ExternalLink, User, Trash2, AlertTriangle, ShieldCheck, LogOut, X } from 'lucide-react';
 import { apiGetHealth } from '../lib/api';
 import { getGeminiApiKey, setGeminiApiKey, cleanApiKey } from '../lib/geminiInBrowser';
+import { useSupabaseAuth } from '../hooks/useSupabaseAuth';
 import type { GeminiVoice } from '../../../shared/schemas';
 
 export const SettingsView: React.FC = () => {
@@ -19,6 +21,28 @@ export const SettingsView: React.FC = () => {
   const [selectedCam, setSelectedCam] = useState<string>('');
   const [saved, setSaved] = useState<boolean>(false);
   const [healthInfo, setHealthInfo] = useState<any>(null);
+
+  const navigate = useNavigate();
+  const { user, logout, deleteAccount, isLoading: isAuthLoading } = useSupabaseAuth();
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.trim() !== 'DELETE') return;
+    setDeleteError(null);
+    const res = await deleteAccount(undefined, deleteConfirmText);
+    if (res.success) {
+      setDeleteSuccess(res.message || 'Account successfully deleted from Supabase.');
+      setIsDeleteModalOpen(false);
+      setTimeout(() => {
+        navigate('/auth');
+      }, 1500);
+    } else {
+      setDeleteError(res.error || 'Failed to delete account.');
+    }
+  };
 
   useEffect(() => {
     // Enumerate hardware devices
@@ -68,6 +92,83 @@ export const SettingsView: React.FC = () => {
           <p className="text-xs text-slate-400 mt-1">
             Configure microphone specs, Web Audio buffers, preferred Gemini vocal model, and language detection sensitivity.
           </p>
+        </div>
+
+        {/* Global Notifications */}
+        {deleteSuccess && (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 shadow-lg animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span>{deleteSuccess}</span>
+          </div>
+        )}
+
+        {/* Section: User Account & Supabase Security Management */}
+        <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 backdrop-blur-xl shadow-xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs uppercase tracking-wider">
+              <User className="w-4 h-4" />
+              <span>User Profile & Supabase Security</span>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold ${
+              user?.isDemo
+                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
+                : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+            }`}>
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{user?.isDemo ? 'Sandbox Demo Session' : 'Active Supabase User'}</span>
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center text-white text-lg font-bold shadow-md shadow-cyan-500/20">
+                {user?.fullName ? user.fullName[0].toUpperCase() : 'U'}
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-white">{user?.fullName || 'User'}</h3>
+                <p className="text-xs text-slate-400 font-mono">{user?.email || 'user@ironthinks.ai'}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  UID: <span className="font-mono text-slate-400">{user?.id || '0000-0000-0000'}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              {user?.isDemo ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/auth')}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 text-white text-xs font-medium shadow-md shadow-brand-500/20 transition-all hover:scale-105"
+                >
+                  Create / Sign In to Account
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteConfirmText('');
+                      setDeleteError(null);
+                      setIsDeleteModalOpen(true);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-medium transition-all hover:scale-105 flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Delete Account</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Section 0: Gemini AI Engine API Key (In-Browser Live AI) */}
@@ -297,6 +398,75 @@ export const SettingsView: React.FC = () => {
             Save Preferences
           </button>
         </div>
+
+        {/* Delete Account Secured Confirmation Modal */}
+        {isDeleteModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
+            <div className="relative w-full max-w-md bg-slate-900 border border-rose-500/30 rounded-3xl p-6 shadow-2xl shadow-rose-950/40 space-y-5 animate-in zoom-in-95">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 text-rose-400 font-bold text-sm">
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center">
+                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  </div>
+                  <span>Delete Supabase User Account</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-xs text-slate-300 leading-relaxed bg-rose-500/5 border border-rose-500/20 p-3.5 rounded-2xl">
+                <p className="font-semibold text-rose-300">
+                  Warning: This action is permanent and cannot be reversed.
+                </p>
+                <p className="text-slate-400">
+                  Deleting your account will purge your profile from Supabase PostgreSQL, cascade delete all audio sessions, transcribed voice records, and agent tool execution logs.
+                </p>
+              </div>
+
+              {deleteError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-300">
+                  To confirm deletion, type <span className="font-mono text-rose-400 font-bold">DELETE</span> below:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteConfirmText.trim() !== 'DELETE' || isAuthLoading}
+                  onClick={handleDeleteAccount}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-semibold shadow-md shadow-rose-600/30 transition-all hover:scale-105 active:scale-95"
+                >
+                  {isAuthLoading ? 'Purging Account...' : 'Permanently Delete Account'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

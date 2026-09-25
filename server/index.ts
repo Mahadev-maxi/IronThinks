@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { authMiddleware } from './middleware/authMiddleware.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { analyticsRouter } from './routes/analytics.js';
+import { authRouter } from './routes/auth.js';
 import { setupWebSocketServer } from './websocket/streamServer.js';
 import { AGENT_PERSONAS } from './config/agentPersonas.js';
 import { isLiveSupabase } from './db/supabase.js';
@@ -50,6 +51,9 @@ app.get('/api/personas', (req, res) => {
     personas: Object.values(AGENT_PERSONAS)
   });
 });
+
+// Authentication & Account Management Routes
+app.use('/api/auth', authRouter);
 
 // Protected API Routes
 app.use('/api/sessions', authMiddleware, sessionsRouter);

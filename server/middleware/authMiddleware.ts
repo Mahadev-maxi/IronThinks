@@ -42,6 +42,22 @@ export async function authMiddleware(
     return next();
   }
 
+  // Handle in-memory / resilient tokens
+  if (token.startsWith('inmem-token-') || token.startsWith('sb-token-')) {
+    const prefix = token.startsWith('inmem-token-') ? 'inmem-token-' : 'sb-token-';
+    const userId = token.substring(prefix.length);
+    const profile = inMemoryDb.profiles.get(userId);
+    if (profile) {
+      req.user = {
+        id: profile.id,
+        email: profile.email,
+        fullName: profile.full_name,
+        avatarUrl: profile.avatar_url
+      };
+      return next();
+    }
+  }
+
   // Live Supabase token validation
   if (isLiveSupabase && supabase) {
     try {
@@ -81,6 +97,20 @@ export async function verifyWsToken(token?: string): Promise<AuthenticatedUser> 
 
   if (!token || token.startsWith('demo-') || token === 'guest') {
     return demoUser;
+  }
+
+  if (token.startsWith('inmem-token-') || token.startsWith('sb-token-')) {
+    const prefix = token.startsWith('inmem-token-') ? 'inmem-token-' : 'sb-token-';
+    const userId = token.substring(prefix.length);
+    const profile = inMemoryDb.profiles.get(userId);
+    if (profile) {
+      return {
+        id: profile.id,
+        email: profile.email,
+        fullName: profile.full_name,
+        avatarUrl: profile.avatar_url
+      };
+    }
   }
 
   if (isLiveSupabase && supabase) {

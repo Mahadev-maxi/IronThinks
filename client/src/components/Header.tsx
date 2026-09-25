@@ -70,19 +70,32 @@ export const Header: React.FC = () => {
         <div className="flex items-center gap-3">
           {user ? (
             <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+              <Link
+                to="/settings"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors group"
+                title="Manage Account & Settings"
+              >
+                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow-sm group-hover:scale-105 transition-transform">
                   {user.fullName ? user.fullName[0].toUpperCase() : 'U'}
                 </div>
                 <div className="hidden sm:flex flex-col text-left">
-                  <span className="text-xs font-medium text-slate-200 leading-tight">
+                  <span className="text-xs font-medium text-slate-200 leading-tight group-hover:text-cyan-300 transition-colors">
                     {user.fullName}
                   </span>
-                  <span className="text-[10px] text-slate-400 leading-tight">
-                    {user.isDemo ? 'Guest Mode' : 'Verified'}
+                  <span className={`text-[10px] leading-tight font-medium ${user.isDemo ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {user.isDemo ? 'Sandbox Session' : 'Supabase Secured'}
                   </span>
                 </div>
-              </div>
+              </Link>
+
+              {user.isDemo ? (
+                <Link
+                  to="/auth"
+                  className="hidden md:inline-flex px-3 py-1.5 rounded-xl bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 border border-brand-500/40 text-xs font-medium transition-all"
+                >
+                  Create Account
+                </Link>
+              ) : null}
 
               <button
                 onClick={logout}

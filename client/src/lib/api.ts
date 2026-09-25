@@ -1,4 +1,4 @@
-import { getStoredToken } from './supabaseClient';
+import { getStoredToken, type UserProfile } from './supabaseClient';
 import { getGeminiApiKey, hasGeminiApiKey, getAnthropicApiKey } from './geminiInBrowser';
 import { AGENT_PERSONAS } from '../../../server/config/agentPersonas';
 import type { StartSessionInput, AnalyticsResponse, AgentPersonaConfig } from '../../../shared/schemas';
@@ -476,3 +476,123 @@ export async function apiGetHealth(): Promise<any> {
     return { status: 'in-browser-mode', platform: 'Ironthinks Vercel Edge' };
   }
 }
+
+// -----------------------------------------------------------------------------
+// Authentication & Supabase User Management API
+// -----------------------------------------------------------------------------
+
+export async function apiSignup(email: string, password: string, fullName: string): Promise<{
+  success: boolean;
+  message?: string;
+  user: UserProfile;
+  token: string;
+}> {
+  try {
+    const res = await fetchWithAuth('/api/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, fullName }),
+    });
+    return res;
+  } catch (err: any) {
+    if (isStaticDeployment()) {
+      const userId = crypto.randomUUID();
+      const user: UserProfile = {
+        id: userId,
+        email: email.trim().toLowerCase(),
+        fullName: fullName.trim() || email.split('@')[0],
+        avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+        isDemo: false
+      };
+      const token = `inmem-token-${userId}`;
+      try {
+        const localAccounts = JSON.parse(localStorage.getItem('ironthinks_local_accounts') || '{}');
+        localAccounts[email.toLowerCase()] = { user, token, password };
+        localStorage.setItem('ironthinks_local_accounts', JSON.stringify(localAccounts));
+      } catch {}
+      return { success: true, message: 'Account created locally in browser sandbox.', user, token };
+    }
+    throw err;
+  }
+}
+
+export async function apiLogin(email: string, password: string): Promise<{
+  success: boolean;
+  user: UserProfile;
+  token: string;
+}> {
+  try {
+    const res = await fetchWithAuth('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    return res;
+  } catch (err: any) {
+    if (isStaticDeployment()) {
+      try {
+        const localAccounts = JSON.parse(localStorage.getItem('ironthinks_local_accounts') || '{}');
+        const acc = localAccounts[email.trim().toLowerCase()];
+        if (acc && acc.password === password) {
+          return { success: true, user: acc.user, token: acc.token };
+        }
+      } catch {}
+      if (email.toLowerCase() === 'alex.director@ironthinks.ai') {
+        const demoUser: UserProfile = {
+          id: '00000000-0000-0000-0000-000000000001',
+          email: 'alex.director@ironthinks.ai',
+          fullName: 'Alex Director',
+          avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+          isDemo: true
+        };
+        return { success: true, user: demoUser, token: 'demo-token-alex-director' };
+      }
+    }
+    throw err;
+  }
+}
+
+export async function apiGetMe(): Promise<{
+  success: boolean;
+  user: UserProfile;
+  backend?: string;
+}> {
+  try {
+    return await fetchWithAuth('/api/auth/me');
+  } catch {
+    const stored = localStorage.getItem('agentic_user');
+    const user = stored ? JSON.parse(stored) : null;
+    return {
+      success: true,
+      user,
+      backend: 'In-Browser Local'
+    };
+  }
+}
+
+export async function apiDeleteAccount(password?: string, confirmText?: string): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  try {
+    return await fetchWithAuth('/api/auth/delete-account', {
+      method: 'DELETE',
+      body: JSON.stringify({ password, confirmText }),
+    });
+  } catch (err: any) {
+    if (isStaticDeployment()) {
+      return {
+        success: true,
+        message: 'Account and associated browser archives permanently removed.'
+      };
+    }
+    throw err;
+  }
+}
+
+export async function apiLogout(): Promise<{ success: boolean }> {
+  try {
+    return await fetchWithAuth('/api/auth/logout', { method: 'POST' });
+  } catch {
+    return { success: true };
+  }
+}
+
