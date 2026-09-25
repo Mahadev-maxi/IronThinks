@@ -9,6 +9,7 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "npm --prefix client run dev",
     "build": "npm --prefix client run build && tsc -p tsconfig.json",
+    "postinstall": "npm --prefix client install",
     "start": "node dist/server/index.js",
     "migrate": "node scripts/migrate.js"
   },
