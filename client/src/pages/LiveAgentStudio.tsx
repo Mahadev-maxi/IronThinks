@@ -33,6 +33,8 @@ export const LiveAgentStudio: React.FC = () => {
     isSpeakerMuted,
     userAudioLevel,
     isModelSpeaking,
+    isListening,
+    interimSpeech,
     detectedLanguage,
     transcripts,
     toolAudits,
@@ -116,6 +118,22 @@ export const LiveAgentStudio: React.FC = () => {
             <span>{formatDuration(callDuration)}</span>
           </div>
 
+          {/* Listening State Pill */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-mono">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                !isMicMuted && isListening
+                  ? 'bg-cyan-400 animate-pulse'
+                  : isMicMuted
+                  ? 'bg-rose-400'
+                  : 'bg-emerald-400'
+              }`}
+            />
+            <span className="text-slate-300">
+              {isMicMuted ? 'Muted' : isListening ? 'Listening...' : 'Mic Ready'}
+            </span>
+          </div>
+
           {/* Connection Status Pill */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs">
             <span
@@ -164,6 +182,14 @@ export const LiveAgentStudio: React.FC = () => {
               />
             )}
           </div>
+
+          {/* Live Voice Input Hearing Banner */}
+          {interimSpeech && (
+            <div className="px-4 py-2.5 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-200 text-xs flex items-center gap-2 shadow-lg shadow-cyan-950/40 animate-pulse">
+              <span className="font-semibold text-cyan-300 shrink-0">🎙️ Hearing you:</span>
+              <span className="italic truncate text-slate-100">"{interimSpeech}..."</span>
+            </div>
+          )}
 
           {/* Interactive TTS Fallback Terminal */}
           <InteractiveTTSTerminal

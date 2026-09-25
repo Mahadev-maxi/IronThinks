@@ -69,6 +69,18 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoIntervalRef = useRef<number | null>(null);
 
+  // Live Speech Recognition States & Refs
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [interimSpeech, setInterimSpeech] = useState<string>('');
+  const recognitionRef = useRef<any>(null);
+  const shouldListenRef = useRef<boolean>(true);
+  const sendTextMessageRef = useRef<(text: string) => void>(() => {});
+  const statusRef = useRef<SessionConnectionStatus>(status);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   // WebSocket & Pipeline Refs
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<PcmRecorder | null>(null);
@@ -113,6 +125,96 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     }
   }, [sessionId]);
 
+  // Start continuous Web Speech recognition
+  const startListening = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecogClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecogClass) {
+      console.warn('[SpeechRecognition] Browser does not support Web Speech Recognition.');
+      return;
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {}
+    }
+
+    try {
+      const recognition = new SpeechRecogClass();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = detectedLanguage.code !== 'auto' ? detectedLanguage.code : (navigator.language || 'en-US');
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        let currentInterim = '';
+        let finalChunk = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const item = event.results[i];
+          if (item && item[0]) {
+            const transcript = item[0].transcript;
+            if (item.isFinal) {
+              finalChunk += transcript;
+            } else {
+              currentInterim += transcript;
+            }
+          }
+        }
+
+        if (currentInterim) {
+          setInterimSpeech(currentInterim);
+        }
+
+        const trimmed = finalChunk.trim();
+        if (trimmed) {
+          console.log('[SpeechRecognition] Final voice chunk captured:', trimmed);
+          setInterimSpeech('');
+          handleBargeIn();
+          sendTextMessageRef.current(trimmed);
+        }
+      };
+
+      recognition.onerror = (e: any) => {
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          console.warn('[SpeechRecognition] Error or notice:', e.error);
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        // Automatically resume listening if still active and not muted
+        if (shouldListenRef.current && !isMicMuted && statusRef.current !== 'ended') {
+          try {
+            recognition.start();
+          } catch {}
+        }
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+      shouldListenRef.current = true;
+      setIsListening(true);
+    } catch (e) {
+      console.warn('[SpeechRecognition] Initialization notice:', e);
+    }
+  }, [detectedLanguage.code, handleBargeIn, isMicMuted]);
+
+  const stopListening = useCallback(() => {
+    shouldListenRef.current = false;
+    setIsListening(false);
+    setInterimSpeech('');
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+  }, []);
+
   // Activate Autonomous Browser Voice Mode (for static hosts like Vercel or offline backend)
   const activateAutonomousBrowserMode = useCallback(() => {
     if (isBrowserModeRef.current) return;
@@ -155,7 +257,14 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     setTimeout(() => {
       speakWithBrowserSpeech(greeting, 'en-US');
     }, 600);
-  }, [personaId, sessionId, speakWithBrowserSpeech]);
+
+    // Start listening to the microphone for user speech
+    if (mode === 'voice_live' && !isMicMuted) {
+      setTimeout(() => {
+        startListening();
+      }, 1000);
+    }
+  }, [personaId, sessionId, speakWithBrowserSpeech, mode, isMicMuted, startListening]);
 
   // Connect to Live Stream
   const connect = useCallback(async () => {
@@ -487,6 +596,11 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     }
   }, [sessionId, personaId, speakWithBrowserSpeech]);
 
+  // Keep sendTextMessageRef updated for SpeechRecognition callback
+  useEffect(() => {
+    sendTextMessageRef.current = sendTextMessage;
+  }, [sendTextMessage]);
+
   // Start / Stop Video Streaming at 1 FPS
   const toggleVideo = useCallback(async (screenShare: boolean = false) => {
     if (isVideoEnabled || isScreenShareEnabled) {
@@ -554,12 +668,17 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
 
   // Toggle Microphone Mute
   const toggleMic = useCallback(() => {
+    const nextMuted = !isMicMuted;
     if (recorderRef.current) {
-      const nextMuted = !isMicMuted;
       recorderRef.current.setMute(nextMuted);
-      setIsMicMuted(nextMuted);
     }
-  }, [isMicMuted]);
+    setIsMicMuted(nextMuted);
+    if (nextMuted) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  }, [isMicMuted, startListening, stopListening]);
 
   // Toggle Speaker Mute
   const toggleSpeaker = useCallback(() => {
@@ -573,6 +692,10 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   // End Session cleanly
   const endSession = useCallback(async () => {
     setStatus('ended');
+    stopListening();
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
 
     // Clean up intervals
     if (pingIntervalRef.current) {
@@ -611,13 +734,17 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     } catch (e) {
       console.error('[LiveSession] Error saving end session:', e);
     }
-  }, [sessionId, detectedLanguage.name, onSessionEnded]);
+  }, [sessionId, detectedLanguage.name, onSessionEnded, stopListening]);
 
   // Auto-connect on mount
   useEffect(() => {
     connect();
 
     return () => {
+      stopListening();
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
       if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
       if (videoStreamRef.current) videoStreamRef.current.getTracks().forEach(t => t.stop());
@@ -634,6 +761,8 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     isSpeakerMuted,
     userAudioLevel,
     isModelSpeaking,
+    isListening,
+    interimSpeech,
     detectedLanguage,
     transcripts,
     toolAudits,
