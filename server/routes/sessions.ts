@@ -73,7 +73,7 @@ sessionsRouter.post('/tts-speak', async (req: AuthenticatedRequest, res: Respons
 // 3. POST /api/sessions/:id/end - Conclude session and trigger post-call intelligence
 sessionsRouter.post('/:id/end', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const sessionId = req.params.id;
+    const sessionId = String(req.params.id);
     const { primaryLanguage } = req.body || {};
 
     const session = await dbEndVoiceSession(sessionId, primaryLanguage);
@@ -115,7 +115,7 @@ sessionsRouter.get('/history', async (req: AuthenticatedRequest, res: Response) 
 // 5. GET /api/sessions/:id - Get single session
 sessionsRouter.get('/:id', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const sessionId = req.params.id;
+    const sessionId = String(req.params.id);
     const session = inMemoryDb.sessions.get(sessionId);
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Mic, Volume2, Camera, Sliders, CheckCircle2, Shield, Info, Radio } from 'lucide-react';
+import { Settings, Mic, Camera, Sliders, CheckCircle2, Shield, Radio } from 'lucide-react';
 import { apiGetHealth } from '../lib/api';
-import { GeminiVoice } from '../../../shared/schemas';
+import type { GeminiVoice } from '../../../shared/schemas';
 
 export const SettingsView: React.FC = () => {
   const [defaultVoice, setDefaultVoice] = useState<GeminiVoice>(

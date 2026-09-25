@@ -1,4 +1,4 @@
-import { AgentPersonaConfig, PersonaId } from '../../shared/schemas.js';
+import type { AgentPersonaConfig, PersonaId } from '../../shared/schemas.js';
 
 export const AGENT_PERSONAS: Record<PersonaId, AgentPersonaConfig> = {
   intake_specialist: {

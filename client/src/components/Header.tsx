@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Sparkles, Radio, History, Settings, ShieldCheck, User as UserIcon, LogOut } from 'lucide-react';
+import { Radio, History, Settings, LogOut } from 'lucide-react';
 import { useSupabaseAuth } from '../hooks/useSupabaseAuth';
 
 export const Header: React.FC = () => {

@@ -9,8 +9,8 @@ import { VideoVisionPreview } from '../components/VideoVisionPreview';
 import { InteractiveTTSTerminal } from '../components/InteractiveTTSTerminal';
 import { MediaControls } from '../components/MediaControls';
 import { getPersonaConfig } from '../../../server/config/agentPersonas';
-import { PersonaId, GeminiVoice, SessionMode } from '../../../shared/schemas';
-import { Shield, Sparkles, Clock, AlertCircle } from 'lucide-react';
+import type { PersonaId, GeminiVoice, SessionMode } from '../../../shared/schemas';
+import { Clock, AlertCircle } from 'lucide-react';
 
 export const LiveAgentStudio: React.FC = () => {
   const { personaId = 'intake_specialist' } = useParams<{ personaId: PersonaId }>();
@@ -51,7 +51,7 @@ export const LiveAgentStudio: React.FC = () => {
     personaId: personaId as PersonaId,
     voiceName,
     mode,
-    onSessionEnded: (analytics) => {
+    onSessionEnded: () => {
       navigate(`/analytics/${sessionId}`);
     }
   });

@@ -9,17 +9,15 @@ import {
   Database,
   RefreshCw,
   ArrowLeft,
-  Calendar,
   Clock,
   Sparkles,
   Bot,
   User,
   CheckCircle2,
-  Copy,
-  Download
+  Copy
 } from 'lucide-react';
 import { apiGetAnalytics, apiReanalyze } from '../lib/api';
-import { AnalyticsResponse, TranscriptEntry, ToolAuditRecord } from '../../../shared/schemas';
+import type { AnalyticsResponse, TranscriptEntry, ToolAuditRecord } from '../../../shared/schemas';
 
 export const AnalyticsView: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -321,9 +319,9 @@ export const AnalyticsView: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-slate-200 capitalize">{t.speaker}</span>
-                      {t.detected_language && (
+                      {t.detectedLanguage && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono">
-                          {t.detected_language}
+                          {t.detectedLanguage}
                         </span>
                       )}
                     </div>

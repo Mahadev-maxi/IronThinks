@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { History, Search, ArrowRight, Clock, Globe2, Mic, MessageSquare, Sparkles, Filter } from 'lucide-react';
+import { History, Search, ArrowRight, Clock, Mic, MessageSquare, Sparkles } from 'lucide-react';
 import { apiGetHistory } from '../lib/api';
 
 export const HistoryView: React.FC = () => {

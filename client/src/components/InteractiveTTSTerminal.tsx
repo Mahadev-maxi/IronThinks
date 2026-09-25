@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Volume2, Sparkles, CornerDownLeft } from 'lucide-react';
+import { Volume2, Sparkles, CornerDownLeft } from 'lucide-react';
 
 interface InteractiveTTSTerminalProps {
   onSendMessage: (text: string) => void;

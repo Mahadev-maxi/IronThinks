@@ -13,10 +13,10 @@ export const analyticsRouter = Router();
 // GET /api/sessions/:id/analytics - Get complete intelligence pack for session
 analyticsRouter.get('/:id/analytics', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const sessionId = req.params.id;
+    const sessionId = String(req.params.id);
 
     // Check if analytics exists
-    let analytics = await dbGetSessionAnalytics(sessionId);
+    let analytics: any = await dbGetSessionAnalytics(sessionId);
     if (!analytics) {
       // Auto-generate if not yet analyzed
       analytics = await runPostCallAnalysis(sessionId);
@@ -43,7 +43,7 @@ analyticsRouter.get('/:id/analytics', async (req: AuthenticatedRequest, res: Res
 // POST /api/sessions/:id/reanalyze - Force recalculation
 analyticsRouter.post('/:id/reanalyze', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const sessionId = req.params.id;
+    const sessionId = String(req.params.id);
     const analytics = await runPostCallAnalysis(sessionId);
 
     return res.status(200).json({

@@ -12,12 +12,11 @@ import {
   Languages,
   HeartPulse,
   TrendingUp,
-  Volume2,
-  CheckCircle2
+  Volume2
 } from 'lucide-react';
-import { apiStartSession, apiGetPersonas } from '../lib/api';
+import { apiStartSession } from '../lib/api';
 import { AGENT_PERSONAS } from '../../../server/config/agentPersonas';
-import { PersonaId, SessionMode } from '../../../shared/schemas';
+import type { PersonaId, SessionMode } from '../../../shared/schemas';
 
 export const AgentGallery: React.FC = () => {
   const navigate = useNavigate();

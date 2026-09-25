@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Mail, Lock, User, ArrowRight, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Sparkles, CheckCircle2 } from 'lucide-react';
 import { useSupabaseAuth } from '../hooks/useSupabaseAuth';
 
 export const AuthPage: React.FC = () => {
