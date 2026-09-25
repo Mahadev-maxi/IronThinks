@@ -208,10 +208,15 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
         const wsProto = cleanApi.startsWith('https') ? 'wss:' : 'ws:';
         const wsHost = cleanApi.replace(/^https?:\/\//, '');
         wsUrl = `${wsProto}//${wsHost}/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
-      } else {
+      } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsHost = window.location.hostname === 'localhost' ? 'localhost:5000' : window.location.host;
-        wsUrl = `${wsProtocol}//${wsHost}/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
+        wsUrl = `${wsProtocol}//localhost:5000/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
+      } else {
+        // Static hosting deployment (e.g. Vercel) without an external WebSocket URL.
+        // Immediately start Autonomous In-Browser Voice Mode directly without attempting a failing WebSocket!
+        console.log('[LiveSession] Static hosting deployment detected without external WebSocket URL. Starting Autonomous In-Browser Voice Mode directly.');
+        activateAutonomousBrowserMode();
+        return;
       }
 
       const socket = new WebSocket(wsUrl);
