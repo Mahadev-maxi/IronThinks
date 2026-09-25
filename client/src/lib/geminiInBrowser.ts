@@ -240,7 +240,7 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
         return result;
       }
     } catch (err) {
-      console.warn('[AIProvider] Direct Gemini API call failed, falling back:', err);
+      console.info('[AIProvider] Direct Gemini API notice, engaging fallback:', (err as any)?.message || err);
     }
   }
 
@@ -534,11 +534,14 @@ async function callGeminiFlashApi({
   sessionId: string;
 }): Promise<AgentGeneratedResult | null> {
   const models = [
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
     'gemini-3.1-flash-lite',
     'gemini-flash-latest',
-    'gemini-3.8-flash',
-    'gemini-3.5-flash',
-    'gemini-3.7-flash',
+    'gemini-3.1-pro',
+    'gemini-pro-latest',
+    'gemini-2.5-pro',
     'gemini-2.5-flash'
   ];
   const formattedContents = formatContentsForGemini(history, userText);
@@ -579,8 +582,18 @@ async function callGeminiFlashApi({
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
-        console.warn(`[GeminiInBrowser] Model ${model} returned HTTP ${res.status}:`, errorText);
+        if (res.status === 503) {
+          console.info(`[GeminiInBrowser] Model ${model} is experiencing temporary high demand (HTTP 503). Auto-switching to alternate model...`);
+          await new Promise((r) => setTimeout(r, 250));
+        } else if (res.status === 429) {
+          console.info(`[GeminiInBrowser] Model ${model} rate-limited (HTTP 429). Switching to alternate model...`);
+          await new Promise((r) => setTimeout(r, 250));
+        } else if (res.status === 404) {
+          console.info(`[GeminiInBrowser] Model ${model} unavailable (HTTP 404), checking next model...`);
+        } else {
+          const errorText = await res.text().catch(() => '');
+          console.info(`[GeminiInBrowser] Model ${model} returned HTTP ${res.status}:`, errorText);
+        }
         continue;
       }
 
@@ -628,7 +641,7 @@ async function callGeminiFlashApi({
         };
       }
     } catch (e) {
-      console.warn(`[GeminiInBrowser] Request to ${model} threw error:`, e);
+      console.info(`[GeminiInBrowser] Model ${model} request notice, switching:`, (e as any)?.message || e);
     }
   }
 
@@ -820,6 +833,84 @@ function runAutonomousAgentEngine({
     }
   }
 
+  // 11. Emotional Support / Depression / Mental Health Inquiries
+  else if (
+    lower.includes('depress') ||
+    lower.includes('feeling down') ||
+    lower.includes('feeling low') ||
+    lower.includes('hopeless') ||
+    lower.includes('mental health') ||
+    lower.includes('sadness') ||
+    lower.includes('lonely') ||
+    lower.includes('anxiety') ||
+    lower.includes('anxious') ||
+    lower.includes('panic attack') ||
+    lower.includes('suicid') ||
+    lower.includes('khinnate') ||
+    lower.includes('khinnathe')
+  ) {
+    const isHelpingFriend = lower.includes('friend') || lower.includes('someone') || lower.includes('brother') || lower.includes('sister') || lower.includes('partner') || lower.includes('relative') || lower.includes('colleague') || lower.includes('mitra') || lower.includes('snehita');
+
+    if (lang === 'Kannada') {
+      if (isHelpingFriend) {
+        replyText = "ಖಿನ್ನತೆಯಲ್ಲಿರುವ ನಿಮ್ಮ ಸ್ನೇಹಿತರಿಗೆ ಸಹಾಯ ಮಾಡಲು: ಮೊದಲನೆಯದಾಗಿ, ಅವರ ಮಾತನ್ನು ಯಾವುದೇ ತೀರ್ಪಿಲ್ಲದೆ ತಾಳ್ಮೆಯಿಂದ ಆಲಿಸಿ. ನೀವು ಅವರೊಂದಿಗೆ ಇದ್ದೀರಿ ಎಂಬ ಭರವಸೆ ನೀಡಿ. ವೃತ್ತಿಪರ ಕೌನ್ಸಿಲರ್ ಅಥವಾ ವೈದ್ಯರ ನೆರವು ಪಡೆಯಲು ಪ್ರೋತ್ಸಾಹಿಸಿ, ಮತ್ತು ಅಗತ್ಯವಿದ್ದರೆ ರಾಷ್ಟ್ರೀಯ ಟೆಲಿ-ಮಾನಸ್ ಸಹಾಯವಾಣಿ 14416 ಸಂಪರ್ಕಿಸಿ.";
+      } else {
+        replyText = "ನೀವು ಈ ರೀತಿ ಭಾವಿಸುತ್ತಿರುವುದಕ್ಕೆ ನನಗೆ ಕಾಳಜಿ ಇದೆ, ದಯವಿಟ್ಟು ನೆನಪಿಡಿ ನೀವು ಒಬ್ಬಂಟಿಯಲ್ಲ. ನಿಮಗೆ ನಂಬಿಕಸ್ತ ಸ್ನೇಹಿತರು ಅಥವಾ ಕುಟುಂಬದವರೊಂದಿಗೆ ಮಾತನಾಡಿ, ಮತ್ತು ವೃತ್ತಿಪರ ಆಪ್ತಸಮಾಲೋಚಕರ ನೆರವು ಪಡೆಯಲು ಹಿಂಜರಿಯಬೇಡಿ. ತಕ್ಷಣದ ಬೆಂಬಲಕ್ಕಾಗಿ ಟೆಲಿ-ಮಾನಸ್ 14416 ಸಹಾಯವಾಣಿಗೆ ಕರೆ ಮಾಡಬಹುದು.";
+      }
+    } else if (lang === 'Hindi') {
+      if (isHelpingFriend) {
+        replyText = "अगर आपका दोस्त डिप्रेशन या तनाव महसूस कर रहा है: उनकी बात बिना जजमेंट के प्यार से सुनें, उन्हें एहसास दिलाएं कि वे अकेले नहीं हैं, और उन्हें डॉक्टर या काउंसलर से परामर्श लेने के लिए प्रेरित करें। हेल्पलाइन: 14416.";
+      } else {
+        replyText = "मैं समझ सकता हूँ कि यह समय कठिन है, लेकिन कृपया याद रखें कि आप अकेले नहीं हैं। किसी करीबी या डॉक्टर से बात करें। मुफ्त और 24/7 सहायता के लिए टेली-मानस हेल्पलाइन 14416 पर कॉल कर सकते हैं।";
+      }
+    } else if (lang === 'Spanish') {
+      if (isHelpingFriend) {
+        replyText = "Para apoyar a un amigo con depresión: escúchelo con paciencia y empatía sin juzgar, hágale saber que cuenta con usted, anímelo con delicadeza a consultar a un profesional de la salud y acompáñelo en el proceso.";
+      } else {
+        replyText = "Lamento mucho que se sienta así. Recuerde que no está solo: hable con una persona de confianza o un terapeuta. Para asistencia confidencial las 24 horas puede llamar o enviar un mensaje al 988.";
+      }
+    } else {
+      if (isHelpingFriend) {
+        replyText = "Supporting a friend with depression makes a real difference. First, listen with empathy and without judgment. Second, stay connected with gentle, low-pressure check-ins. Third, encourage them to speak with a doctor or counselor, and if there is immediate danger, call or text the 988 Crisis Lifeline.";
+      } else {
+        replyText = "I hear you, and please remember that you do not have to carry this alone. Reach out to someone you trust, take things one gentle step at a time, and consider speaking with a healthcare professional. Free, 24/7 confidential support is available anytime by calling or texting 988.";
+      }
+    }
+  }
+
+  // 12. General Health / Physical Symptoms
+  else if (
+    lower.includes('headache') ||
+    lower.includes('fever') ||
+    lower.includes('stomach ache') ||
+    lower.includes('cough') ||
+    lower.includes('cold') ||
+    lower.includes('dizzy') ||
+    lower.includes('nausea') ||
+    lower.includes('feeling sick') ||
+    lower.includes('unwell')
+  ) {
+    if (lang === 'Kannada') {
+      replyText = "ವಿಶ್ರಾಂತಿ ಪಡೆಯಿರಿ ಮತ್ತು ಸಾಕಷ್ಟು ನೀರು ಕುಡಿಯಿರಿ. ರೋಗಲಕ್ಷಣಗಳು ತೀವ್ರವಾಗಿದ್ದರೆ ಅಥವಾ ಮುಂದುವರಿದರೆ ತಕ್ಷಣ ವೈದ್ಯರನ್ನು ಸಂಪರ್ಕಿಸಿ.";
+    } else if (lang === 'Hindi') {
+      replyText = "कृपया पर्याप्त आराम करें और खूब पानी पिएं। यदि लक्षण ज्यादा हैं या लगातार बने रहते हैं, तो तुरंत डॉक्टर से परामर्श लें।";
+    } else {
+      replyText = "Please ensure you rest and stay well hydrated. Monitor your symptoms closely, and consult a qualified healthcare professional or doctor if symptoms persist or worsen.";
+    }
+  }
+
+  // 13. Productivity, Focus & Motivation
+  else if (
+    lower.includes('how to focus') ||
+    lower.includes('study tips') ||
+    lower.includes('how to study') ||
+    lower.includes('motivation') ||
+    lower.includes('procrastinat') ||
+    lower.includes('routine')
+  ) {
+    replyText = "Here are three proven strategies: 1. Use the Pomodoro technique (25 minutes of deep focus, followed by a 5-minute break). 2. Remove digital distractions and write down your single priority for the session. 3. Break large tasks into tiny, low-friction starting steps.";
+  }
+
   // 6. Polyglot Tutor Persona Specifics
   else if (personaId === 'polyglot_tutor') {
     toolRecord = {
@@ -983,10 +1074,21 @@ function runAutonomousAgentEngine({
         replyText = "Main bilkul theek hoon! Aap bataiye, aap kaise hain aur main aapki kya madad kar sakta hoon?";
       } else if (lower.includes('weather') || lower.includes('mausam')) {
         replyText = "Live weather updates are currently unavailable on this channel, but you can check your local weather app. How else can I assist you?";
+      } else if (
+        lower.startsWith('what is') ||
+        lower.startsWith('what are') ||
+        lower.startsWith('how do') ||
+        lower.startsWith('how can') ||
+        lower.startsWith('why do') ||
+        lower.startsWith('why is') ||
+        lower.startsWith('can you explain') ||
+        lower.startsWith('tell me about')
+      ) {
+        replyText = `Regarding "${userText}": That is an excellent question. In real-time voice mode, I can provide direct analysis, breakdown steps, or guide your workflow. Let me know which aspect you would like to begin with!`;
       } else if (lang === 'Kannada') {
-        replyText = `ನಿಮ್ಮ ಪ್ರಶ್ನೆ "${userText}" ಗೆ: ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`;
+        replyText = `ಖಂಡಿತ, ನಿಮ್ಮ ವಿಷಯ "${userText}" ಕುರಿತು ನಾನು ನಿಮಗೆ ಸಂತೋಷದಿಂದ ಸಹಾಯ ಮಾಡುತ್ತೇನೆ. ಇನ್ನಷ್ಟು ವಿವರಗಳನ್ನು ಹಂಚಿಕೊಳ್ಳಿ!`;
       } else if (lang === 'Hindi') {
-        replyText = `Aapke sawaal "${userText}" ke baare mein: main aapki kis tarah se madad kar sakta hoon?`;
+        replyText = `निश्चित रूप से, "${userText}" के संबंध में मैं आपकी पूरी मदद करूँगा। कृपया बताएं आप क्या जानना चाहते हैं?`;
       } else {
         replyText = `Regarding "${userText}": I am right here and ready to help. What specific details would you like to explore?`;
       }

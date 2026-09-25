@@ -181,6 +181,8 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   const lastSpeechNetworkWarnTimeRef = useRef<number>(0);
   const sendTextMessageRef = useRef<(text: string) => void | Promise<void>>(() => {});
   const statusRef = useRef<SessionConnectionStatus>(status);
+  const speechDebounceTimerRef = useRef<number | null>(null);
+  const accumulatedSpeechRef = useRef<string>('');
 
   useEffect(() => {
     statusRef.current = status;
@@ -295,10 +297,28 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
 
         const trimmed = finalChunk.trim();
         if (trimmed) {
-          console.log('[SpeechRecognition] Final voice chunk captured:', trimmed);
           setInterimSpeech('');
           handleBargeIn();
-          sendTextMessageRef.current(trimmed);
+
+          if (speechDebounceTimerRef.current) {
+            clearTimeout(speechDebounceTimerRef.current);
+            speechDebounceTimerRef.current = null;
+          }
+
+          accumulatedSpeechRef.current = (accumulatedSpeechRef.current ? `${accumulatedSpeechRef.current} ` : '') + trimmed;
+
+          // Short phrases like "my friend" wait slightly longer to capture the subsequent clause
+          const words = accumulatedSpeechRef.current.trim().split(/\s+/);
+          const debounceMs = words.length <= 2 ? 650 : 450;
+
+          speechDebounceTimerRef.current = window.setTimeout(() => {
+            const completeUtterance = accumulatedSpeechRef.current.trim();
+            accumulatedSpeechRef.current = '';
+            if (completeUtterance) {
+              console.log('[SpeechRecognition] Complete voice utterance captured:', completeUtterance);
+              sendTextMessageRef.current(completeUtterance);
+            }
+          }, debounceMs);
         }
       };
 
@@ -842,6 +862,11 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   const endSession = useCallback(async () => {
     setStatus('ended');
     stopListening();
+    if (speechDebounceTimerRef.current) {
+      clearTimeout(speechDebounceTimerRef.current);
+      speechDebounceTimerRef.current = null;
+    }
+    accumulatedSpeechRef.current = '';
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
