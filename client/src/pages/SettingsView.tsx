@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Mic, Camera, Sliders, CheckCircle2, Shield, Radio } from 'lucide-react';
+import { Settings, Mic, Camera, Sliders, CheckCircle2, Shield, Radio, Key, Sparkles, ExternalLink } from 'lucide-react';
 import { apiGetHealth } from '../lib/api';
+import { getGeminiApiKey, setGeminiApiKey } from '../lib/geminiInBrowser';
 import type { GeminiVoice } from '../../../shared/schemas';
 
 export const SettingsView: React.FC = () => {
@@ -10,6 +11,8 @@ export const SettingsView: React.FC = () => {
   const [sensitivity, setSensitivity] = useState<number>(
     Number(localStorage.getItem('pref_sensitivity') || 85)
   );
+  const [geminiKey, setGeminiKeyState] = useState<string>(getGeminiApiKey());
+  const [showKey, setShowKey] = useState<boolean>(false);
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>('');
@@ -36,6 +39,7 @@ export const SettingsView: React.FC = () => {
   const handleSave = () => {
     localStorage.setItem('pref_voice', defaultVoice);
     localStorage.setItem('pref_sensitivity', sensitivity.toString());
+    setGeminiApiKey(geminiKey);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -62,6 +66,66 @@ export const SettingsView: React.FC = () => {
           <p className="text-xs text-slate-400 mt-1">
             Configure microphone specs, Web Audio buffers, preferred Gemini vocal model, and language detection sensitivity.
           </p>
+        </div>
+
+        {/* Section 0: Gemini AI Engine API Key (In-Browser Live AI) */}
+        <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 backdrop-blur-xl shadow-xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+              <Key className="w-4 h-4" />
+              <span>Google Gemini AI Engine (Direct In-Browser)</span>
+            </div>
+            <a
+              href="https://aistudio.google.com/apikey"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-[11px] text-brand-400 hover:text-brand-300 font-medium transition-colors"
+            >
+              <span>Get Free Gemini Key</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Enter your Google AI Studio Gemini API key to activate direct real-time Gemini 2.0 Flash reasoning right in your browser. If empty, the resilient autonomous agentic engine powers your sessions.
+          </p>
+
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={geminiKey}
+                onChange={(e) => setGeminiKeyState(e.target.value)}
+                placeholder="AIzaSy... (Paste Gemini API Key from Google AI Studio)"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 pr-20"
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey(!showKey)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 hover:text-slate-200"
+              >
+                {showKey ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {geminiKey && (
+              <button
+                type="button"
+                onClick={() => setGeminiKeyState('')}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>
+              Status:{' '}
+              <strong className={geminiKey ? 'text-emerald-400' : 'text-slate-300'}>
+                {geminiKey ? 'Active (Gemini 2.0 Flash Enabled)' : 'Autonomous Simulator Mode (No Key Needed)'}
+              </strong>
+            </span>
+          </div>
         </div>
 
         {/* Section 1: Prebuilt Agentic Voice Selection */}

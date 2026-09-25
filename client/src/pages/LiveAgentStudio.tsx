@@ -10,7 +10,8 @@ import { InteractiveTTSTerminal } from '../components/InteractiveTTSTerminal';
 import { MediaControls } from '../components/MediaControls';
 import { getPersonaConfig } from '../../../server/config/agentPersonas';
 import type { PersonaId, GeminiVoice, SessionMode } from '../../../shared/schemas';
-import { Clock, AlertCircle } from 'lucide-react';
+import { Clock, AlertCircle, Sparkles, X, ExternalLink } from 'lucide-react';
+import { getGeminiApiKey, setGeminiApiKey, hasGeminiApiKey } from '../lib/geminiInBrowser';
 
 export const LiveAgentStudio: React.FC = () => {
   const { personaId = 'intake_specialist' } = useParams<{ personaId: PersonaId }>();
@@ -25,6 +26,15 @@ export const LiveAgentStudio: React.FC = () => {
 
   // Call duration counter
   const [callDuration, setCallDuration] = useState<number>(0);
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
+  const [apiKeyInput, setApiKeyInput] = useState<string>(getGeminiApiKey());
+  const [hasKey, setHasKey] = useState<boolean>(hasGeminiApiKey());
+
+  const handleSaveApiKey = () => {
+    setGeminiApiKey(apiKeyInput);
+    setHasKey(hasGeminiApiKey());
+    setShowKeyModal(false);
+  };
 
   const {
     status,
@@ -134,6 +144,23 @@ export const LiveAgentStudio: React.FC = () => {
             </span>
           </div>
 
+          {/* Gemini Mode Pill Button */}
+          <button
+            onClick={() => {
+              setApiKeyInput(getGeminiApiKey());
+              setShowKeyModal(true);
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-mono transition-all ${
+              hasKey
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+            }`}
+            title="Configure Google Gemini API Key"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{hasKey ? 'Gemini 2.0 Live' : 'Smart Agentic (Add Key)'}</span>
+          </button>
+
           {/* Connection Status Pill */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs">
             <span
@@ -149,6 +176,77 @@ export const LiveAgentStudio: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Gemini API Key Modal */}
+      {showKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Sparkles className="w-5 h-5 text-amber-400" />
+                <span>Google Gemini API Key</span>
+              </div>
+              <button
+                onClick={() => setShowKeyModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Paste your Gemini API key to activate direct, real-time Gemini 2.0 Flash reasoning right in your browser.
+            </p>
+
+            <div className="space-y-2">
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="AIzaSy... (Paste Gemini API Key)"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-brand-500"
+              />
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-brand-400 hover:underline"
+                >
+                  <span>Get Free Key on AI Studio</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+                {apiKeyInput && (
+                  <button
+                    type="button"
+                    onClick={() => setApiKeyInput('')}
+                    className="text-slate-400 hover:text-slate-200"
+                  >
+                    Clear key
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowKeyModal(false)}
+                className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveApiKey}
+                className="px-5 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold shadow-md shadow-brand-500/25 transition-all"
+              >
+                Save & Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Error alert if any */}
       {errorMessage && (
