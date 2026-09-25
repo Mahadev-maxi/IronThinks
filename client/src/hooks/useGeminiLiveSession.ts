@@ -315,6 +315,15 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
             const completeUtterance = accumulatedSpeechRef.current.trim();
             accumulatedSpeechRef.current = '';
             if (completeUtterance) {
+              const lowerUtterance = completeUtterance.toLowerCase();
+              const noiseFillers = new Set(['only', 'um', 'uh', 'ah', 'er', 'hmm', 'the', 'a', 'an']);
+              // Ignore single isolated filler noises or sub-3 letter non-words
+              if (noiseFillers.has(lowerUtterance)) {
+                return;
+              }
+              if (completeUtterance.length < 3 && !['hi', 'no', 'ok', 'yo'].includes(lowerUtterance)) {
+                return;
+              }
               console.log('[SpeechRecognition] Complete voice utterance captured:', completeUtterance);
               sendTextMessageRef.current(completeUtterance);
             }
@@ -326,12 +335,12 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
         if (e.error === 'network') {
           consecutiveNetworkErrorsRef.current += 1;
           const now = Date.now();
-          if (now - lastSpeechNetworkWarnTimeRef.current > 15000) {
-            console.warn('[SpeechRecognition] Web Speech network endpoint unavailable, applying exponential backoff.');
+          if (now - lastSpeechNetworkWarnTimeRef.current > 30000) {
+            console.info('[SpeechRecognition] Web Speech endpoint temporary network pause, applying backoff.');
             lastSpeechNetworkWarnTimeRef.current = now;
           }
         } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
-          console.warn('[SpeechRecognition] Notice:', e.error);
+          console.info('[SpeechRecognition] Status:', e.error);
         }
       };
 

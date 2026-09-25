@@ -856,6 +856,20 @@ function runAutonomousAgentEngine({
     replyText = "IronThinks uses Web Audio streaming with 16kHz PCM audio capture and Google's Gemini multimodal models. When you speak, audio is processed in real time with continuous speech recognition, sub-second translation, and autonomous tool calling.";
   }
 
+  // 3.1 Real-Time Access Explanation
+  else if (
+    lower.includes('real time access') ||
+    lower.includes('real-time access') ||
+    lower.includes('give the real time') ||
+    lower.includes('give real time') ||
+    lower.includes('how can i give')
+  ) {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    replyText = `Real-time access is already fully active on IronThinks! I have continuous real-time access to the exact date (${dateStr}), time (${timeStr}), your timezone, and live weather. You do not need to configure anything—just ask me for the date, time, or live weather!`;
+  }
+
   // 4. Greetings
   else if (
     lower.startsWith('hello') ||
