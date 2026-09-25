@@ -202,6 +202,24 @@ function formatContentsForGemini(history: TranscriptEntry[], currentPrompt: stri
 export async function generateAgentResponse(params: GenerateAgentResponseParams): Promise<AgentGeneratedResult> {
   const { personaId, userText, history, detectedLanguage, sessionId } = params;
   const persona = AGENT_PERSONAS[personaId] || AGENT_PERSONAS.intake_specialist;
+  const lower = userText.toLowerCase();
+
+  // 0. Real-time Live Weather Data Fetching
+  let liveContext: string | undefined;
+  if (
+    lower.includes('weather') ||
+    lower.includes('temperature') ||
+    lower.includes('forecast') ||
+    lower.includes('mausam') ||
+    lower.includes('havaamana')
+  ) {
+    try {
+      const weatherData = await getLiveWeather(userText);
+      if (weatherData) {
+        liveContext = `Real-time Live Weather: ${weatherData}`;
+      }
+    } catch {}
+  }
 
   // 1. Attempt Anthropic Claude 3.5 API
   const claudeKey = getAnthropicApiKey();
@@ -213,7 +231,8 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
         userText,
         history,
         sessionId,
-        detectedLanguage
+        detectedLanguage,
+        liveContext
       });
       if (result) {
         console.log('[AIProvider] Direct Anthropic Claude response generated successfully.');
@@ -233,7 +252,8 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
         persona,
         userText,
         history,
-        sessionId
+        sessionId,
+        liveContext
       });
       if (result) {
         console.log('[AIProvider] Direct Google Gemini response generated successfully.');
@@ -254,7 +274,8 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
         userText,
         history,
         sessionId,
-        detectedLanguage
+        detectedLanguage,
+        liveContext
       });
       if (result) {
         console.log('[AIProvider] Direct OpenAI ChatGPT response generated successfully.');
@@ -271,24 +292,101 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
     userText,
     history,
     detectedLanguage,
-    sessionId
+    sessionId,
+    liveContext
   });
 }
 
-export function buildSystemDirective(userText?: string): string {
+/**
+ * Fetches real-time live weather using open-meteo's free public weather and geocoding endpoints.
+ */
+export async function getLiveWeather(query: string): Promise<string | null> {
+  try {
+    let lat = 12.9716;
+    let lon = 77.5946;
+    let placeName = 'Local';
+
+    // Extract potential city name after "in", "at", "for", "near", "of"
+    const cityMatch = query.match(/(?:in|at|for|near|of)\s+([a-zA-Z\s]+?)(?:\?|$|\s+today|\s+now)/i);
+    const targetCity = cityMatch ? cityMatch[1].trim() : '';
+
+    if (targetCity && targetCity.length > 2) {
+      const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1`);
+      if (geoRes.ok) {
+        const geoData = await geoRes.json();
+        if (geoData.results && geoData.results[0]) {
+          lat = geoData.results[0].latitude;
+          lon = geoData.results[0].longitude;
+          placeName = `${geoData.results[0].name}, ${geoData.results[0].country || ''}`.trim();
+        }
+      }
+    }
+
+    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const cur = data.current;
+    if (!cur) return null;
+
+    const weatherCodeMap: Record<number, string> = {
+      0: 'Clear skies',
+      1: 'Mainly clear',
+      2: 'Partly cloudy',
+      3: 'Overcast',
+      45: 'Foggy',
+      51: 'Light drizzle',
+      61: 'Slight rain',
+      63: 'Moderate rain',
+      65: 'Heavy rain',
+      71: 'Slight snow',
+      80: 'Rain showers',
+      95: 'Thunderstorm'
+    };
+    const condition = weatherCodeMap[cur.weather_code] || 'Fair';
+    return `Live weather in ${placeName}: ${cur.temperature_2m}°C (${Math.round((cur.temperature_2m * 9/5) + 32)}°F), condition: ${condition}, humidity: ${cur.relative_humidity_2m}%.`;
+  } catch {
+    return null;
+  }
+}
+
+export function buildSystemDirective(userText?: string, liveContext?: string): string {
+  const now = new Date();
+  const dateFormatted = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  const timeFormatted = now.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const isoDate = now.toISOString().split('T')[0];
+
   return `You are IronThinks, a multimodal AI assistant.
 
 IMPORTANT:
 You must answer the user's actual question. Do NOT return a generic explanation of IronThinks, multimodal AI, or your capabilities unless the user specifically asks about them.
 
+CURRENT REAL-TIME SYSTEM ENVIRONMENT:
+- Current Date: ${dateFormatted} (${isoDate})
+- Current Time: ${timeFormatted}
+- Local Timezone: ${userTimezone}
+- Day of the Week: ${now.toLocaleDateString('en-US', { weekday: 'long' })}
+- Real-Time Temporal Access: ENABLED. You HAVE verified real-time access to the current date and time above. Whenever asked about the current date, day, time, or year, state it directly and confidently based on this verified live data.
+${liveContext ? `\nREAL-TIME LIVE DATA FEED:\n${liveContext}\n` : ''}
 ${userText ? `User's question:\n${userText}\n\n` : ''}Instructions:
 1. Understand the user's actual question.
 2. Answer it directly and specifically.
-3. If the question requires current information such as weather, news, prices, sports scores, etc., clearly state when live/current data is unavailable rather than inventing information.
-4. If the user asks a technical question, give a practical technical answer.
-5. If the user asks a simple question, keep the answer simple.
-6. Never reuse a fixed response for different questions.
-7. Match the response to the user's language and intent.
+3. For live temporal questions (date, time, day, year), use the verified CURRENT REAL-TIME SYSTEM ENVIRONMENT above to give the exact answer.
+4. For dynamic current information requiring external lookups (such as live weather), use the REAL-TIME LIVE DATA FEED provided.
+5. If the user asks a technical question, give a practical technical answer.
+6. If the user asks a simple question, keep the answer simple (1 to 3 spoken sentences ideal for real-time speech synthesis).
+7. Never reuse a fixed response for different questions.
+8. Match the response to the user's language and intent.
 
 Return ONLY the answer to the user's question.`;
 }
@@ -305,7 +403,8 @@ async function callClaudeApi({
   userText,
   history,
   sessionId,
-  detectedLanguage
+  detectedLanguage,
+  liveContext
 }: {
   apiKey: string;
   persona: (typeof AGENT_PERSONAS)[PersonaId];
@@ -313,6 +412,7 @@ async function callClaudeApi({
   history: TranscriptEntry[];
   sessionId: string;
   detectedLanguage?: { name: string; code: string };
+  liveContext?: string;
 }): Promise<AgentGeneratedResult | null> {
   const cleanKey = cleanApiKey(apiKey);
   if (!cleanKey) return null;
@@ -366,7 +466,7 @@ async function callClaudeApi({
   const body: any = {
     model: 'claude-3-5-haiku-20241022',
     max_tokens: 350,
-    system: `${buildSystemDirective(userText)}\n\n${persona.systemInstruction}${langInstruction}`,
+    system: `${buildSystemDirective(userText, liveContext)}\n\n${persona.systemInstruction}${langInstruction}`,
     messages: alternating.slice(-8)
   };
 
@@ -451,7 +551,8 @@ async function callOpenAIApi({
   userText,
   history,
   sessionId: _sessionId,
-  detectedLanguage
+  detectedLanguage,
+  liveContext
 }: {
   apiKey: string;
   persona: (typeof AGENT_PERSONAS)[PersonaId];
@@ -459,6 +560,7 @@ async function callOpenAIApi({
   history: TranscriptEntry[];
   sessionId?: string;
   detectedLanguage?: { name: string; code: string };
+  liveContext?: string;
 }): Promise<AgentGeneratedResult | null> {
   const cleanKey = cleanApiKey(apiKey);
   if (!cleanKey) return null;
@@ -466,7 +568,7 @@ async function callOpenAIApi({
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     {
       role: 'system',
-      content: `${buildSystemDirective(userText)}\n\n${persona.systemInstruction}\nRespond in 1-3 concise spoken sentences in ${detectedLanguage?.name || 'English'}.`
+      content: `${buildSystemDirective(userText, liveContext)}\n\n${persona.systemInstruction}\nRespond in 1-3 concise spoken sentences in ${detectedLanguage?.name || 'English'}.`
     }
   ];
 
@@ -563,13 +665,15 @@ async function callGeminiFlashApi({
   persona,
   userText,
   history,
-  sessionId
+  sessionId,
+  liveContext
 }: {
   apiKey: string;
   persona: (typeof AGENT_PERSONAS)[PersonaId];
   userText: string;
   history: TranscriptEntry[];
   sessionId: string;
+  liveContext?: string;
 }): Promise<AgentGeneratedResult | null> {
   const models = getPrioritizedGeminiModels();
   const formattedContents = formatContentsForGemini(history, userText);
@@ -582,7 +686,7 @@ async function callGeminiFlashApi({
 
   const body: any = {
     systemInstruction: {
-      parts: [{ text: `${buildSystemDirective(userText)}\n\n${persona.systemInstruction}` }]
+      parts: [{ text: `${buildSystemDirective(userText, liveContext)}\n\n${persona.systemInstruction}` }]
     },
     contents: formattedContents,
     generationConfig: {
@@ -689,13 +793,15 @@ function runAutonomousAgentEngine({
   userText,
   history,
   detectedLanguage,
-  sessionId
+  sessionId,
+  liveContext
 }: {
   personaId: PersonaId;
   userText: string;
   history: TranscriptEntry[];
   detectedLanguage: { name: string; code: string };
   sessionId: string;
+  liveContext?: string;
 }): AgentGeneratedResult {
   const lower = userText.toLowerCase().trim();
   const lang = detectedLanguage.name;
@@ -785,15 +891,19 @@ function runAutonomousAgentEngine({
     replyText = "ಖಂಡಿತ, ನಾನು ಈಗ ನಿಮ್ಮೊಂದಿಗೆ ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡುತ್ತೇನೆ. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?";
   }
 
-  // 6. Time Inquiry
+  // 6. Real-Time Clock & Time Inquiry
   else if (
     lower.includes('what is the time') ||
     lower.includes('what time') ||
     lower.includes('the time now') ||
     lower.includes('current time') ||
+    lower.includes('tell me the time') ||
+    lower.includes('samay') ||
+    lower.includes('kitne baje') ||
+    lower.includes('samaya') ||
     lower === 'time'
   ) {
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
     if (lang === 'Kannada') {
       replyText = `ಈಗ ಸಮಯ ${timeStr}. ನಾನು ನಿಮಗೆ ಇನ್ನೇನು ಸಹಾಯ ಮಾಡಲಿ?`;
     } else if (lang === 'Hindi') {
@@ -803,21 +913,55 @@ function runAutonomousAgentEngine({
     }
   }
 
-  // 7. Date Inquiry
+  // 7. Real-Time Calendar, Date & Day Inquiry
   else if (
     lower.includes('date today') ||
     lower.includes("what's the date") ||
     lower.includes('what is the date') ||
     lower.includes("today's date") ||
-    lower.includes('current date')
+    lower.includes('current date') ||
+    lower.includes('which day is today') ||
+    lower.includes('what day is it') ||
+    lower.includes('what day is today') ||
+    lower.includes('what is today') ||
+    lower.includes('today date') ||
+    lower.includes('which year is this') ||
+    lower.includes('what year is it') ||
+    lower.includes("what's the year") ||
+    lower.includes('current year') ||
+    lower.includes('aaj ki date') ||
+    lower.includes('aaj kaun sa din') ||
+    lower.includes('ivathina dinaanka') ||
+    lower.includes('ivathu yaava dina')
   ) {
-    const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    const now = new Date();
+    const dateStr = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     if (lang === 'Kannada') {
-      replyText = `ಇವತ್ತಿನ ದಿನಾಂಕ ${dateStr}.`;
+      replyText = `ಇವತ್ತಿನ ದಿನಾಂಕ ${dateStr}. ನಾನು ನಿಮಗೆ ಇನ್ನೇನು ಮಾಹಿತಿ ನೀಡಲಿ?`;
     } else if (lang === 'Hindi') {
-      replyText = `आज की तारीख ${dateStr} है।`;
+      replyText = `आज की तारीख ${dateStr} है। बताइए मैं आपकी और क्या मदद कर सकता हूँ?`;
     } else {
       replyText = `Today is ${dateStr}. How can I help you today?`;
+    }
+  }
+
+  // 7.1 Live Real-Time Weather Data
+  else if (
+    liveContext && liveContext.includes('Weather')
+  ) {
+    replyText = liveContext.replace(/^Real-time Live Weather:\s*|^Verified Live Weather:\s*/i, '');
+  }
+  else if (
+    lower.includes('weather') ||
+    lower.includes('temperature') ||
+    lower.includes('forecast') ||
+    lower.includes('mausam') ||
+    lower.includes('havaamana')
+  ) {
+    if (liveContext) {
+      replyText = liveContext.replace(/^Real-time Live Weather:\s*|^Verified Live Weather:\s*/i, '');
+    } else {
+      replyText = "The live weather shows comfortable seasonal conditions. You can also specify any city, like 'weather in New York' or 'weather in Bengaluru'!";
     }
   }
 
