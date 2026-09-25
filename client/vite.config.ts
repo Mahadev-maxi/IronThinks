@@ -6,14 +6,20 @@ import path from 'path';
 export default defineConfig(({ mode }) => {
   // Load env from root directory (..) as well as client
   const env = loadEnv(mode, path.resolve(process.cwd(), '..'), '');
-  const apiKey = env.VITE_GEMINI_API_KEY || env.GEMINI_API_KEY || '';
+  const geminiKey = env.VITE_GEMINI_API_KEY || env.GEMINI_API_KEY || '';
+  const anthropicKey = env.VITE_ANTHROPIC_API_KEY || env.ANTHROPIC_API_KEY || '';
+  const openaiKey = env.VITE_OPENAI_API_KEY || env.OPENAI_API_KEY || '';
 
   return {
     envDir: '../',
     plugins: [react()],
     define: {
-      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(apiKey),
-      'import.meta.env.GEMINI_API_KEY': JSON.stringify(apiKey)
+      'import.meta.env.VITE_ANTHROPIC_API_KEY': JSON.stringify(anthropicKey),
+      'import.meta.env.ANTHROPIC_API_KEY': JSON.stringify(anthropicKey),
+      'import.meta.env.VITE_OPENAI_API_KEY': JSON.stringify(openaiKey),
+      'import.meta.env.OPENAI_API_KEY': JSON.stringify(openaiKey),
+      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(geminiKey),
+      'import.meta.env.GEMINI_API_KEY': JSON.stringify(geminiKey)
     },
     server: {
       port: 5173,

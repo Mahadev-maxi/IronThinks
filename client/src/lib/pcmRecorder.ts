@@ -1,10 +1,66 @@
 /**
- * Microphone manager using AudioWorklet to capture 16kHz 16-bit Mono PCM.
+ * Microphone manager using AudioWorklet (inline Blob) to capture 16kHz 16-bit Mono PCM.
+ * Falls back to ScriptProcessor if AudioWorklet is not permitted or fails to initialize.
  */
+
+const WORKLET_PROCESSOR_CODE = `
+class PcmCaptureProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.targetSampleRate = 16000;
+    this.bufferSize = 2048; // ~128ms at 16kHz
+    this.buffer = new Int16Array(this.bufferSize);
+    this.bufferIndex = 0;
+    this.isMuted = false;
+
+    this.port.onmessage = (event) => {
+      if (event.data && typeof event.data.muted === 'boolean') {
+        this.isMuted = event.data.muted;
+      }
+    };
+  }
+
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    if (!input || !input[0] || this.isMuted) {
+      return true;
+    }
+
+    const channelData = input[0];
+    const inputSampleRate = sampleRate;
+    const sampleRateRatio = inputSampleRate / this.targetSampleRate;
+
+    for (let i = 0; i < channelData.length; i += sampleRateRatio) {
+      const index = Math.floor(i);
+      const sample = channelData[index];
+
+      const clamped = Math.max(-1.0, Math.min(1.0, sample));
+      const int16Sample = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+
+      this.buffer[this.bufferIndex++] = int16Sample;
+
+      if (this.bufferIndex >= this.bufferSize) {
+        const chunkToSend = new Int16Array(this.buffer);
+        this.port.postMessage({
+          pcmChunk: chunkToSend.buffer
+        }, [chunkToSend.buffer]);
+
+        this.bufferIndex = 0;
+      }
+    }
+
+    return true;
+  }
+}
+
+registerProcessor('pcm-capture-processor', PcmCaptureProcessor);
+`;
+
 export class PcmRecorder {
   private audioContext: AudioContext | null = null;
   private mediaStream: MediaStream | null = null;
   private workletNode: AudioWorkletNode | null = null;
+  private scriptProcessorNode: ScriptProcessorNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   private isRecording: boolean = false;
   private isMuted: boolean = false;
@@ -36,26 +92,69 @@ export class PcmRecorder {
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       await this.audioContext.resume();
 
-      // Load our AudioWorklet processor
-      await this.audioContext.audioWorklet.addModule('/audio-processor.js');
-
       const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-      this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-capture-processor');
 
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 256;
       source.connect(this.analyserNode);
-      source.connect(this.workletNode);
 
-      // Handle raw PCM chunks from processor
-      this.workletNode.port.onmessage = (event) => {
-        if (!this.isRecording || this.isMuted) return;
-        const arrayBuffer = event.data?.pcmChunk as ArrayBuffer;
-        if (arrayBuffer) {
-          const base64 = this.arrayBufferToBase64(arrayBuffer);
-          this.onAudioChunk(base64);
+      // Try inline AudioWorklet first (avoids any network request)
+      let workletLoaded = false;
+      if (this.audioContext.audioWorklet) {
+        try {
+          const blob = new Blob([WORKLET_PROCESSOR_CODE], { type: 'application/javascript' });
+          const workletUrl = URL.createObjectURL(blob);
+          try {
+            await this.audioContext.audioWorklet.addModule(workletUrl);
+            this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-capture-processor');
+            source.connect(this.workletNode);
+
+            this.workletNode.port.onmessage = (event) => {
+              if (!this.isRecording || this.isMuted) return;
+              const arrayBuffer = event.data?.pcmChunk as ArrayBuffer;
+              if (arrayBuffer) {
+                const base64 = this.arrayBufferToBase64(arrayBuffer);
+                this.onAudioChunk(base64);
+              }
+            };
+            workletLoaded = true;
+          } finally {
+            URL.revokeObjectURL(workletUrl);
+          }
+        } catch (workletErr) {
+          console.warn('[PcmRecorder] AudioWorklet setup notice, using script processor fallback:', workletErr);
         }
-      };
+      }
+
+      // Fallback to ScriptProcessor if worklet is unavailable
+      if (!workletLoaded) {
+        try {
+          const bufferSize = 2048;
+          this.scriptProcessorNode = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+          source.connect(this.scriptProcessorNode);
+          this.scriptProcessorNode.connect(this.audioContext.destination);
+
+          this.scriptProcessorNode.onaudioprocess = (e) => {
+            if (!this.isRecording || this.isMuted) return;
+            const input = e.inputBuffer.getChannelData(0);
+            const targetSampleRate = 16000;
+            const ratio = (this.audioContext?.sampleRate || 44100) / targetSampleRate;
+            const outLength = Math.floor(input.length / ratio);
+            const pcm = new Int16Array(outLength);
+
+            for (let i = 0; i < outLength; i++) {
+              const srcIdx = Math.floor(i * ratio);
+              const sample = Math.max(-1.0, Math.min(1.0, input[srcIdx]));
+              pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+            }
+
+            const base64 = this.arrayBufferToBase64(pcm.buffer);
+            this.onAudioChunk(base64);
+          };
+        } catch (scriptErr) {
+          console.warn('[PcmRecorder] ScriptProcessor fallback notice:', scriptErr);
+        }
+      }
 
       this.isRecording = true;
 
@@ -108,12 +207,17 @@ export class PcmRecorder {
     }
 
     if (this.workletNode) {
-      this.workletNode.disconnect();
+      try { this.workletNode.disconnect(); } catch {}
       this.workletNode = null;
     }
 
+    if (this.scriptProcessorNode) {
+      try { this.scriptProcessorNode.disconnect(); } catch {}
+      this.scriptProcessorNode = null;
+    }
+
     if (this.analyserNode) {
-      this.analyserNode.disconnect();
+      try { this.analyserNode.disconnect(); } catch {}
       this.analyserNode = null;
     }
 
@@ -123,7 +227,7 @@ export class PcmRecorder {
     }
 
     if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close();
+      try { this.audioContext.close(); } catch {}
       this.audioContext = null;
     }
   }

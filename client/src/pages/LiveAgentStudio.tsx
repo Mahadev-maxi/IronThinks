@@ -59,7 +59,8 @@ export const LiveAgentStudio: React.FC = () => {
     toggleMic,
     toggleSpeaker,
     toggleVideo,
-    endSession
+    endSession,
+    setLanguage
   } = useGeminiLiveSession({
     sessionId,
     personaId: personaId as PersonaId,
@@ -122,6 +123,7 @@ export const LiveAgentStudio: React.FC = () => {
             code={detectedLanguage.code}
             flag={detectedLanguage.flag}
             confidence={detectedLanguage.confidence}
+            onSelectLanguage={setLanguage}
           />
 
           {/* Duration Clock */}

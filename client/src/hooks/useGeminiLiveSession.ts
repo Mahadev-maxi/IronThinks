@@ -16,25 +16,120 @@ export interface UseGeminiLiveSessionOptions {
   onSessionEnded?: (analytics: any) => void;
 }
 
+export const SUPPORTED_LANGUAGES = [
+  { name: 'Kannada', code: 'kn-IN', flag: '🇮🇳', nativeName: 'ಕನ್ನಡ' },
+  { name: 'English', code: 'en-US', flag: '🇺🇸', nativeName: 'English' },
+  { name: 'Hindi', code: 'hi-IN', flag: '🇮🇳', nativeName: 'हिन्दी' },
+  { name: 'Spanish', code: 'es-ES', flag: '🇪🇸', nativeName: 'Español' },
+  { name: 'French', code: 'fr-FR', flag: '🇫🇷', nativeName: 'Français' },
+  { name: 'German', code: 'de-DE', flag: '🇩🇪', nativeName: 'Deutsch' },
+  { name: 'Italian', code: 'it-IT', flag: '🇮🇹', nativeName: 'Italiano' },
+  { name: 'Portuguese', code: 'pt-BR', flag: '🇧🇷', nativeName: 'Português' },
+  { name: 'Japanese', code: 'ja-JP', flag: '🇯🇵', nativeName: '日本語' },
+  { name: 'Mandarin Chinese', code: 'zh-CN', flag: '🇨🇳', nativeName: '中文' },
+  { name: 'Korean', code: 'ko-KR', flag: '🇰🇷', nativeName: '한국어' },
+  { name: 'Arabic', code: 'ar-SA', flag: '🇸🇦', nativeName: 'العربية' },
+  { name: 'Russian', code: 'ru-RU', flag: '🇷🇺', nativeName: 'Русский' },
+  { name: 'Telugu', code: 'te-IN', flag: '🇮🇳', nativeName: 'తెలుగు' },
+  { name: 'Tamil', code: 'ta-IN', flag: '🇮🇳', nativeName: 'தமிழ்' },
+  { name: 'Malayalam', code: 'ml-IN', flag: '🇮🇳', nativeName: 'മലയാളം' },
+  { name: 'Bengali', code: 'bn-IN', flag: '🇮🇳', nativeName: 'বাংলা' },
+  { name: 'Gujarati', code: 'gu-IN', flag: '🇮🇳', nativeName: 'ગુજરાતી' },
+  { name: 'Marathi', code: 'mr-IN', flag: '🇮🇳', nativeName: 'मराठी' },
+];
+
 const LANGUAGE_DETECTION_PATTERNS: Array<{
   regex: RegExp;
   name: string;
   code: string;
   flag: string;
 }> = [
-  { regex: /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff].*(?:こんにちは|ありがとう|はい|です|ます)/i, name: 'Japanese', code: 'ja-JP', flag: '🇯🇵' },
+  // Kannada
+  { regex: /[\u0C80-\u0CFF]|(?:kannada|namaskara|hegidira|hegiddira|beku|enu|yenu|dayavittu|dhanyavada|kannadadalli|kannad)/i, name: 'Kannada', code: 'kn-IN', flag: '🇮🇳' },
+  // Telugu
+  { regex: /[\u0C00-\u0C7F]|(?:telugu|namaskaram|ela|unnavu|dhanyavadalu)/i, name: 'Telugu', code: 'te-IN', flag: '🇮🇳' },
+  // Tamil
+  { regex: /[\u0B80-\u0BFF]|(?:tamil|vanakkam|eppadi|irukinga|nandri)/i, name: 'Tamil', code: 'ta-IN', flag: '🇮🇳' },
+  // Malayalam
+  { regex: /[\u0D00-\u0D7F]|(?:malayalam|namaskaram|enthokke|sukhamano|nanni)/i, name: 'Malayalam', code: 'ml-IN', flag: '🇮🇳' },
+  // Hindi
+  { regex: /[\u0900-\u097F]|(?:hindi|namaste|kya|hai|aap|kaise|shukriya|madad|theek)/i, name: 'Hindi', code: 'hi-IN', flag: '🇮🇳' },
+  // Bengali
+  { regex: /[\u0980-\u09FF]|(?:bengali|bangla|nomoshkar|dhonnobad)/i, name: 'Bengali', code: 'bn-IN', flag: '🇮🇳' },
+  // Gujarati
+  { regex: /[\u0A80-\u0AFF]|(?:gujarati|kem cho|aabhar)/i, name: 'Gujarati', code: 'gu-IN', flag: '🇮🇳' },
+  // Japanese
+  { regex: /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]|(?:こんにちは|ありがとう|はい|です|ます)/i, name: 'Japanese', code: 'ja-JP', flag: '🇯🇵' },
+  // Mandarin Chinese
   { regex: /[\u4e00-\u9fa5]/i, name: 'Mandarin Chinese', code: 'zh-CN', flag: '🇨🇳' },
+  // Korean
   { regex: /[\uac00-\ud7af]/i, name: 'Korean', code: 'ko-KR', flag: '🇰🇷' },
+  // Arabic
   { regex: /[\u0600-\u06FF]/i, name: 'Arabic', code: 'ar-SA', flag: '🇸🇦' },
-  { regex: /[\u0900-\u097F]|(?:namaste|kya|hai|aap|kaise|shukriya|madad)/i, name: 'Hindi', code: 'hi-IN', flag: '🇮🇳' },
+  // Russian
   { regex: /[\u0400-\u04FF]|(?:privet|spasibo|kak|dela)/i, name: 'Russian', code: 'ru-RU', flag: '🇷🇺' },
+  // Spanish
   { regex: /\b(?:hola|buenos|dias|tardes|gracias|por favor|necesito|ayuda|cita|consulta|como)\b/i, name: 'Spanish', code: 'es-ES', flag: '🇪🇸' },
+  // French
   { regex: /\b(?:bonjour|bonsoir|merci|s'il vous plait|aide|rendez-vous|comment)\b/i, name: 'French', code: 'fr-FR', flag: '🇫🇷' },
+  // German
   { regex: /\b(?:guten|hallo|danke|bitte|termin|hilfe|wie|geht)\b/i, name: 'German', code: 'de-DE', flag: '🇩🇪' },
+  // Italian
   { regex: /\b(?:ciao|buongiorno|grazie|per favore|aiuto|come|posso)\b/i, name: 'Italian', code: 'it-IT', flag: '🇮🇹' },
-  { regex: /\b(?:olá|ola|obrigado|obrigada|por favor|ajuda|consulta)\b/i, name: 'Portuguese', code: 'pt-BR', flag: '🇧🇷' },
-  { regex: /./, name: 'English', code: 'en-US', flag: '🇺🇸' }
+  // Portuguese
+  { regex: /\b(?:olá|ola|obrigado|obrigada|por favor|ajuda|consulta)\b/i, name: 'Portuguese', code: 'pt-BR', flag: '🇧🇷' }
 ];
+
+function detectOrSwitchLanguage(
+  text: string,
+  current: { name: string; code: string; flag: string; confidence: number }
+): { name: string; code: string; flag: string; confidence: number } {
+  const lower = text.toLowerCase().trim();
+
+  // 1. Explicit language switch commands (e.g. "switch the language into Kannada", "which language to Kannada", "speak in Kannada")
+  const switchMatch =
+    lower.match(/(?:switch|change|set|speak|talk|convert|use|which)?\s*(?:the\s*)?language\s*(?:to|in|into)\s*([a-z]+)/i) ||
+    lower.match(/(?:speak|talk|converse)\s*in\s*([a-z]+)/i) ||
+    lower.match(/switch\s*to\s*([a-z]+)/i);
+
+  if (switchMatch && switchMatch[1]) {
+    const targetName = switchMatch[1].toLowerCase();
+    const found = SUPPORTED_LANGUAGES.find(
+      (l) => l.name.toLowerCase().startsWith(targetName) || targetName.startsWith(l.name.toLowerCase())
+    );
+    if (found) {
+      return { name: found.name, code: found.code, flag: found.flag, confidence: 1.0 };
+    }
+  }
+
+  // 2. Direct language name mentioned as isolated command
+  for (const lang of SUPPORTED_LANGUAGES) {
+    const langLow = lang.name.toLowerCase();
+    if (lower === langLow || lower === `in ${langLow}` || lower.includes(`into ${langLow}`) || lower.includes(`to ${langLow}`)) {
+      return { name: lang.name, code: lang.code, flag: lang.flag, confidence: 1.0 };
+    }
+  }
+
+  // 3. Pattern / Unicode / Keyword matching
+  for (const pat of LANGUAGE_DETECTION_PATTERNS) {
+    if (pat.regex.test(text)) {
+      return { name: pat.name, code: pat.code, flag: pat.flag, confidence: 0.98 };
+    }
+  }
+
+  // 4. Preserve existing non-English language on short affirmative or neutral utterances
+  if (
+    current.code !== 'auto' &&
+    current.name !== 'Auto-Detecting' &&
+    (text.split(/\s+/).length <= 3 ||
+      /^(?:yes|no|ok|okay|hello|hi|hey|thanks|thank you|sure|right|speaking|fine|good)\b/i.test(lower))
+  ) {
+    return current;
+  }
+
+  // 5. Default fallback to English
+  return { name: 'English', code: 'en-US', flag: '🇺🇸', confidence: 0.98 };
+}
 
 export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   const { sessionId, personaId, voiceName = 'Puck', mode = 'voice_live', onSessionEnded } = options;
@@ -79,6 +174,11 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   const [interimSpeech, setInterimSpeech] = useState<string>('');
   const recognitionRef = useRef<any>(null);
   const shouldListenRef = useRef<boolean>(true);
+  const speechRestartTimerRef = useRef<number | null>(null);
+  const consecutiveNetworkErrorsRef = useRef<number>(0);
+  const isRecognitionActiveRef = useRef<boolean>(false);
+  const isRecognitionStartingRef = useRef<boolean>(false);
+  const lastSpeechNetworkWarnTimeRef = useRef<number>(0);
   const sendTextMessageRef = useRef<(text: string) => void | Promise<void>>(() => {});
   const statusRef = useRef<SessionConnectionStatus>(status);
 
@@ -103,6 +203,16 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
       utterance.lang = langCode;
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
+
+      // Select closest matching voice if available
+      try {
+        const voices = window.speechSynthesis.getVoices?.() || [];
+        const match = voices.find(
+          (v) => v.lang === langCode || v.lang.startsWith(langCode.split('-')[0])
+        );
+        if (match) utterance.voice = match;
+      } catch {}
+
       utterance.onstart = () => setIsModelSpeaking(true);
       utterance.onend = () => setIsModelSpeaking(false);
       utterance.onerror = () => setIsModelSpeaking(false);
@@ -135,7 +245,10 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     if (typeof window === 'undefined') return;
     const SpeechRecogClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecogClass) {
-      console.warn('[SpeechRecognition] Browser does not support Web Speech Recognition.');
+      return;
+    }
+
+    if (isRecognitionActiveRef.current || isRecognitionStartingRef.current) {
       return;
     }
 
@@ -152,10 +265,15 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
       recognition.lang = detectedLanguage.code !== 'auto' ? detectedLanguage.code : (navigator.language || 'en-US');
 
       recognition.onstart = () => {
+        isRecognitionStartingRef.current = false;
+        isRecognitionActiveRef.current = true;
         setIsListening(true);
       };
 
       recognition.onresult = (event: any) => {
+        // Reset network error counter upon successful recognition
+        consecutiveNetworkErrorsRef.current = 0;
+
         let currentInterim = '';
         let finalChunk = '';
 
@@ -185,37 +303,77 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
       };
 
       recognition.onerror = (e: any) => {
-        if (e.error !== 'no-speech' && e.error !== 'aborted') {
-          console.warn('[SpeechRecognition] Error or notice:', e.error);
+        if (e.error === 'network') {
+          consecutiveNetworkErrorsRef.current += 1;
+          const now = Date.now();
+          if (now - lastSpeechNetworkWarnTimeRef.current > 15000) {
+            console.warn('[SpeechRecognition] Web Speech network endpoint unavailable, applying exponential backoff.');
+            lastSpeechNetworkWarnTimeRef.current = now;
+          }
+        } else if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          console.warn('[SpeechRecognition] Notice:', e.error);
         }
       };
 
       recognition.onend = () => {
+        isRecognitionActiveRef.current = false;
+        isRecognitionStartingRef.current = false;
         setIsListening(false);
-        // Automatically resume listening if still active and not muted
+        if (speechRestartTimerRef.current) {
+          clearTimeout(speechRestartTimerRef.current);
+          speechRestartTimerRef.current = null;
+        }
+
+        // Exponential backoff if repeated network errors: 1.5s -> 3s -> 6s -> max 15s
         if (shouldListenRef.current && !isMicMuted && statusRef.current !== 'ended') {
-          try {
-            recognition.start();
-          } catch {}
+          const errCount = consecutiveNetworkErrorsRef.current;
+          const delay = errCount > 0
+            ? Math.min(15000, Math.floor(1000 * Math.pow(1.8, Math.min(errCount, 5))))
+            : 300;
+
+          speechRestartTimerRef.current = window.setTimeout(() => {
+            if (
+              shouldListenRef.current &&
+              !isMicMuted &&
+              statusRef.current !== 'ended' &&
+              !isRecognitionActiveRef.current &&
+              !isRecognitionStartingRef.current
+            ) {
+              try {
+                isRecognitionStartingRef.current = true;
+                recognition.start();
+              } catch {
+                isRecognitionStartingRef.current = false;
+              }
+            }
+          }, delay);
         }
       };
 
+      isRecognitionStartingRef.current = true;
       recognition.start();
       recognitionRef.current = recognition;
       shouldListenRef.current = true;
       setIsListening(true);
-    } catch (e) {
-      console.warn('[SpeechRecognition] Initialization notice:', e);
+    } catch {
+      isRecognitionStartingRef.current = false;
+      isRecognitionActiveRef.current = false;
     }
   }, [detectedLanguage.code, handleBargeIn, isMicMuted]);
 
   const stopListening = useCallback(() => {
     shouldListenRef.current = false;
+    isRecognitionActiveRef.current = false;
+    isRecognitionStartingRef.current = false;
     setIsListening(false);
     setInterimSpeech('');
+    if (speechRestartTimerRef.current) {
+      clearTimeout(speechRestartTimerRef.current);
+      speechRestartTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current.abort();
       } catch {}
     }
   }, []);
@@ -224,6 +382,7 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
   const activateAutonomousBrowserMode = useCallback(() => {
     if (isBrowserModeRef.current) return;
     isBrowserModeRef.current = true;
+    try { localStorage.setItem(`ironthinks_autonomous_${sessionId}`, 'true'); } catch {}
     console.log('[LiveSession] Activating Autonomous In-Browser Voice Mode');
 
     setStatus('connected');
@@ -280,39 +439,58 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
 
     try {
       // 1. Initialize 24kHz Web Audio Player
-      playerRef.current = new PcmStreamPlayer(24000);
-      await playerRef.current.init();
-
-      // 2. Initialize 16kHz AudioWorklet Recorder (if voice mode)
-      if (mode === 'voice_live') {
-        recorderRef.current = new PcmRecorder({
-          onAudioChunk: (pcmBase64) => {
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({
-                type: 'realtime_audio',
-                sessionId,
-                payload: { pcmBase64 }
-              }));
-            }
-          },
-          onVolumeChange: (vol) => {
-            setUserAudioLevel(vol);
-
-            // Instant Barge-In detection: if user speaks loudly while model audio is playing, cancel model audio!
-            if (vol > 0.28 && isModelSpeaking) {
-              handleBargeIn();
-            }
-          }
-        });
-
-        await recorderRef.current.start();
+      try {
+        playerRef.current = new PcmStreamPlayer(24000);
+        await playerRef.current.init();
+      } catch (playErr) {
+        console.warn('[LiveSession] Audio player setup notice:', playErr);
       }
 
-      // 3. Connect to Backend WebSocket
+      // 2. Initialize 16kHz Audio Recorder (if voice mode)
+      if (mode === 'voice_live') {
+        try {
+          recorderRef.current = new PcmRecorder({
+            onAudioChunk: (pcmBase64) => {
+              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({
+                  type: 'realtime_audio',
+                  sessionId,
+                  payload: { pcmBase64 }
+                }));
+              }
+            },
+            onVolumeChange: (vol) => {
+              setUserAudioLevel(vol);
+
+              // Instant Barge-In detection: if user speaks loudly while model audio is playing, cancel model audio!
+              if (vol > 0.28 && isModelSpeaking) {
+                handleBargeIn();
+              }
+            }
+          });
+
+          await recorderRef.current.start();
+        } catch (recErr) {
+          console.warn('[LiveSession] Audio recorder setup notice:', recErr);
+        }
+      }
+
+      // 3. Connect to Backend WebSocket (or start In-Browser Autonomous Mode if on static host)
       const token = getStoredToken();
       let wsUrl = '';
       const customWs = import.meta.env.VITE_WS_URL;
       const customApi = import.meta.env.VITE_API_URL;
+      const isStaticHosting = !customWs && (
+        !customApi ||
+        customApi.includes('vercel.app') ||
+        (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && (!customApi || customApi.includes(window.location.hostname)))
+      );
+
+      if (isStaticHosting) {
+        console.log('[LiveSession] Static hosting deployment detected without external WebSocket URL. Starting Autonomous In-Browser Voice Mode directly.');
+        activateAutonomousBrowserMode();
+        return;
+      }
 
       if (customWs) {
         const baseWs = customWs.replace(/\/$/, '');
@@ -326,9 +504,7 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = `${wsProtocol}//localhost:5000/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
       } else {
-        // Static hosting deployment (e.g. Vercel) without an external WebSocket URL.
-        // Immediately start Autonomous In-Browser Voice Mode directly without attempting a failing WebSocket!
-        console.log('[LiveSession] Static hosting deployment detected without external WebSocket URL. Starting Autonomous In-Browser Voice Mode directly.');
+        console.log('[LiveSession] Starting Autonomous In-Browser Voice Mode directly.');
         activateAutonomousBrowserMode();
         return;
       }
@@ -509,14 +685,8 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
         timestamp: new Date().toISOString()
       };
 
-      // Detect language
-      let detected = { name: 'English', code: 'en-US', flag: '🌐', confidence: 0.98 };
-      for (const pat of LANGUAGE_DETECTION_PATTERNS) {
-        if (pat.regex.test(text)) {
-          detected = { name: pat.name, code: pat.code, flag: pat.flag, confidence: 0.98 };
-          break;
-        }
-      }
+      // Detect or switch language intelligently based on text and intent
+      const detected = detectOrSwitchLanguage(text, detectedLanguage);
       userEntry.detectedLanguage = detected.name;
       setDetectedLanguage(detected);
 
@@ -635,7 +805,11 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
         }));
       }, 1000); // 1 FPS
     } catch (err: any) {
-      console.error('[LiveSession] Error starting video stream:', err);
+      if (err?.name === 'NotAllowedError' || err?.message?.includes('Permission denied')) {
+        console.warn('[LiveSession] Camera or screen share permission dismissed or denied by user.');
+      } else {
+        console.error('[LiveSession] Error starting video stream:', err);
+      }
       setIsVideoEnabled(false);
       setIsScreenShareEnabled(false);
     }
@@ -707,9 +881,13 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
       }
       return res;
     } catch (e) {
-      console.error('[LiveSession] Error saving end session:', e);
+      console.warn('[LiveSession] Notice finalizing session:', e);
     }
   }, [sessionId, detectedLanguage.name, onSessionEnded, stopListening]);
+
+  const setLanguage = useCallback((lang: { name: string; code: string; flag: string }) => {
+    setDetectedLanguage({ ...lang, confidence: 1.0 });
+  }, []);
 
   // Auto-connect on mount
   useEffect(() => {
@@ -752,6 +930,7 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
     toggleSpeaker,
     toggleVideo,
     endSession,
-    setActiveVisualDiagram
+    setActiveVisualDiagram,
+    setLanguage
   };
 }

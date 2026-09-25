@@ -115,7 +115,7 @@ export class GeminiLiveSessionBridge {
     // Attempt Live Connection with Official @google/genai SDK if Key is available
     if (aiClient && hasValidGeminiKey) {
       try {
-        const liveModel = 'gemini-2.0-flash-exp'; // Or gemini-2.5-flash / gemini-3.1-flash-live-preview
+        const liveModel = 'gemini-2.5-flash'; // Or gemini-3.1-flash-live-preview
         const liveConfig = {
           responseModalities: ['AUDIO'],
           speechConfig: {

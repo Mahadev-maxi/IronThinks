@@ -1,17 +1,62 @@
 import type { PersonaId, ToolAuditRecord, TranscriptEntry } from '../../../shared/schemas';
 import { AGENT_PERSONAS } from '../../../server/config/agentPersonas';
 
+export const DEFAULT_ANTHROPIC_KEY = '';
+export const DEFAULT_OPENAI_KEY = '';
+
 export function cleanApiKey(raw: string): string {
   if (!raw) return '';
   let cleaned = raw.trim();
-  // Strip any prepended variable names like GEMINI_API_KEY= or VITE_GEMINI_API_KEY= or API_KEY=
-  cleaned = cleaned.replace(/^(?:VITE_)?GEMINI_API_KEY\s*[:=]\s*/i, '');
+  // Strip any prepended variable names like ANTHROPIC_API_KEY= or GEMINI_API_KEY= or API_KEY=
+  cleaned = cleaned.replace(/^(?:VITE_)?(?:ANTHROPIC|CLAUDE|GEMINI|OPENAI|CHATGPT)_API_KEY\s*[:=]\s*/i, '');
   cleaned = cleaned.replace(/^API_KEY\s*[:=]\s*/i, '');
   // Strip surrounding quotes
   cleaned = cleaned.replace(/^["']|["']$/g, '');
   return cleaned.trim();
 }
 
+// ----------------------------------------------------
+// Anthropic Claude Key Management
+// ----------------------------------------------------
+export function getAnthropicApiKey(): string {
+  try {
+    const local = localStorage.getItem('anthropic_api_key') || localStorage.getItem('claude_api_key') || localStorage.getItem('VITE_ANTHROPIC_API_KEY');
+    if (local) {
+      const cleaned = cleanApiKey(local);
+      if (cleaned.length > 10) return cleaned;
+    }
+  } catch {}
+
+  const metaEnv = (import.meta as any).env;
+  const envKey = metaEnv?.VITE_ANTHROPIC_API_KEY || metaEnv?.ANTHROPIC_API_KEY;
+  if (envKey && typeof envKey === 'string') {
+    const cleaned = cleanApiKey(envKey);
+    if (cleaned.length > 10) return cleaned;
+  }
+
+  return DEFAULT_ANTHROPIC_KEY;
+}
+
+export function setAnthropicApiKey(key: string): void {
+  try {
+    const cleaned = cleanApiKey(key);
+    if (!cleaned) {
+      localStorage.removeItem('anthropic_api_key');
+      localStorage.removeItem('claude_api_key');
+      localStorage.removeItem('VITE_ANTHROPIC_API_KEY');
+    } else {
+      localStorage.setItem('anthropic_api_key', cleaned);
+    }
+  } catch {}
+}
+
+export function hasAnthropicApiKey(): boolean {
+  return Boolean(getAnthropicApiKey());
+}
+
+// ----------------------------------------------------
+// Google Gemini Key Management
+// ----------------------------------------------------
 export function getGeminiApiKey(): string {
   try {
     const local = localStorage.getItem('gemini_api_key') || localStorage.getItem('VITE_GEMINI_API_KEY');
@@ -48,6 +93,40 @@ export function hasGeminiApiKey(): boolean {
   return Boolean(getGeminiApiKey());
 }
 
+// ----------------------------------------------------
+// OpenAI Key Management
+// ----------------------------------------------------
+export function getOpenAIApiKey(): string {
+  try {
+    const local = localStorage.getItem('openai_api_key') || localStorage.getItem('VITE_OPENAI_API_KEY');
+    if (local) {
+      const cleaned = cleanApiKey(local);
+      if (cleaned.length > 10) return cleaned;
+    }
+  } catch {}
+
+  const metaEnv = (import.meta as any).env;
+  const envKey = metaEnv?.VITE_OPENAI_API_KEY || metaEnv?.OPENAI_API_KEY;
+  if (envKey && typeof envKey === 'string') {
+    const cleaned = cleanApiKey(envKey);
+    if (cleaned.length > 10) return cleaned;
+  }
+
+  return DEFAULT_OPENAI_KEY;
+}
+
+export function setOpenAIApiKey(key: string): void {
+  try {
+    const cleaned = cleanApiKey(key);
+    if (!cleaned) {
+      localStorage.removeItem('openai_api_key');
+      localStorage.removeItem('VITE_OPENAI_API_KEY');
+    } else {
+      localStorage.setItem('openai_api_key', cleaned);
+    }
+  } catch {}
+}
+
 interface GenerateAgentResponseParams {
   personaId: PersonaId;
   userText: string;
@@ -61,6 +140,7 @@ export interface AgentGeneratedResult {
   toolRecord?: ToolAuditRecord;
   visualDiagram?: { title: string; diagramType: string; contentSummary: string };
   isDirectGemini: boolean;
+  aiProvider?: string;
 }
 
 /**
@@ -80,18 +160,15 @@ function formatContentsForGemini(history: TranscriptEntry[], currentPrompt: stri
     turns.push({ role, text });
   }
 
-  // Ensure current user prompt is present as the latest turn
   const last = turns[turns.length - 1];
   if (!last || last.role !== 'user' || last.text !== currentPrompt.trim()) {
     turns.push({ role: 'user', text: currentPrompt.trim() });
   }
 
-  // Gemini API requires first turn to be 'user'
   while (turns.length > 0 && turns[0].role === 'model') {
     turns.shift();
   }
 
-  // Enforce strict alternation
   const alternating: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
   for (const turn of turns) {
     if (alternating.length === 0) {
@@ -108,44 +185,87 @@ function formatContentsForGemini(history: TranscriptEntry[], currentPrompt: stri
     }
   }
 
-  // Guarantee final turn is 'user'
   if (alternating.length === 0 || alternating[alternating.length - 1].role !== 'user') {
     alternating.push({ role: 'user', parts: [{ text: currentPrompt.trim() }] });
   }
 
-  // Limit to recent 8 turns for fast latency
   return alternating.slice(-8);
 }
 
 /**
- * Generate an intelligent response using either direct Google Gemini Flash API
- * or our context-aware agentic conversational engine.
+ * Primary Agent Response Generator:
+ * Tier 1: Anthropic Claude 3.5 (Primary Requested Backend)
+ * Tier 2: Google Gemini Flash
+ * Tier 3: OpenAI ChatGPT
+ * Tier 4: Autonomous Context-Aware Local Engine
  */
 export async function generateAgentResponse(params: GenerateAgentResponseParams): Promise<AgentGeneratedResult> {
   const { personaId, userText, history, detectedLanguage, sessionId } = params;
-  const apiKey = getGeminiApiKey();
   const persona = AGENT_PERSONAS[personaId] || AGENT_PERSONAS.intake_specialist;
 
-  // 1. Attempt direct Google Gemini Flash API if an API key is available
-  if (apiKey) {
+  // 1. Attempt Anthropic Claude 3.5 API
+  const claudeKey = getAnthropicApiKey();
+  if (claudeKey) {
+    try {
+      const result = await callClaudeApi({
+        apiKey: claudeKey,
+        persona,
+        userText,
+        history,
+        sessionId,
+        detectedLanguage
+      });
+      if (result) {
+        console.log('[AIProvider] Direct Anthropic Claude response generated successfully.');
+        return result;
+      }
+    } catch (err) {
+      console.warn('[AIProvider] Anthropic Claude call failed, falling back:', err);
+    }
+  }
+
+  // 2. Attempt Google Gemini Flash API
+  const geminiKey = getGeminiApiKey();
+  if (geminiKey) {
     try {
       const result = await callGeminiFlashApi({
-        apiKey,
+        apiKey: geminiKey,
         persona,
         userText,
         history,
         sessionId
       });
       if (result) {
-        console.log('[GeminiInBrowser] Direct Gemini response generated successfully.');
+        console.log('[AIProvider] Direct Google Gemini response generated successfully.');
         return result;
       }
     } catch (err) {
-      console.warn('[GeminiInBrowser] Direct Gemini API call failed, falling back to autonomous engine:', err);
+      console.warn('[AIProvider] Direct Gemini API call failed, falling back:', err);
     }
   }
 
-  // 2. Intelligent autonomous conversational engine (Relevant, dynamic, contextual)
+  // 3. Attempt OpenAI ChatGPT API
+  const openAiKey = getOpenAIApiKey();
+  if (openAiKey) {
+    try {
+      const result = await callOpenAIApi({
+        apiKey: openAiKey,
+        persona,
+        userText,
+        history,
+        sessionId,
+        detectedLanguage
+      });
+      if (result) {
+        console.log('[AIProvider] Direct OpenAI ChatGPT response generated successfully.');
+        return result;
+      }
+    } catch (err) {
+      console.warn('[AIProvider] OpenAI ChatGPT call failed, falling back:', err);
+    }
+  }
+
+  // 4. Intelligent Autonomous Conversational Engine (Resilient, relevant, dynamic)
   return runAutonomousAgentEngine({
     personaId,
     userText,
@@ -153,6 +273,248 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
     detectedLanguage,
     sessionId
   });
+}
+
+export const IRONTHINKS_SYSTEM_DIRECTIVE = `You are IronThinks, a multimodal AI assistant.
+
+IMPORTANT:
+You must answer the user's actual question. Do NOT return a generic explanation of IronThinks, multimodal AI, or your capabilities unless the user specifically asks about them.
+
+Instructions:
+1. Understand the user's actual question.
+2. Answer it directly and specifically.
+3. If the question requires current information such as weather, news, prices, sports scores, etc., clearly state when live/current data is unavailable rather than inventing information.
+4. If the user asks a technical question, give a practical technical answer.
+5. If the user asks a simple question, keep the answer simple (1 to 3 spoken sentences ideal for real-time speech synthesis).
+6. Never reuse a fixed response for different questions.
+7. Match the response to the user's language and intent (e.g. Hindi, Kannada, Spanish, French, English).
+
+Return ONLY the direct answer to the user's question.`;
+
+/**
+ * Calls Anthropic Claude Messages API directly from the browser.
+ * Uses 'anthropic-dangerous-direct-browser-access': 'true' header for CORS compliance.
+ */
+async function callClaudeApi({
+  apiKey,
+  persona,
+  userText,
+  history,
+  sessionId,
+  detectedLanguage
+}: {
+  apiKey: string;
+  persona: (typeof AGENT_PERSONAS)[PersonaId];
+  userText: string;
+  history: TranscriptEntry[];
+  sessionId: string;
+  detectedLanguage?: { name: string; code: string };
+}): Promise<AgentGeneratedResult | null> {
+  const cleanKey = cleanApiKey(apiKey);
+  if (!cleanKey) return null;
+
+  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+  for (const item of history) {
+    const text = item.content?.trim();
+    if (!text) continue;
+    const role = item.speaker === 'user' ? 'user' : 'assistant';
+    messages.push({ role, content: text });
+  }
+
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user' || last.content !== userText.trim()) {
+    messages.push({ role: 'user', content: userText.trim() });
+  }
+
+  while (messages.length > 0 && messages[0].role === 'assistant') {
+    messages.shift();
+  }
+
+  const alternating: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const turn of messages) {
+    if (alternating.length === 0) {
+      if (turn.role === 'user') alternating.push(turn);
+    } else {
+      const prev = alternating[alternating.length - 1];
+      if (prev.role === turn.role) {
+        prev.content += `\n${turn.content}`;
+      } else {
+        alternating.push(turn);
+      }
+    }
+  }
+
+  if (alternating.length === 0 || alternating[alternating.length - 1].role !== 'user') {
+    alternating.push({ role: 'user', content: userText.trim() });
+  }
+
+  const tools = persona.tools?.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.parameters || { type: 'object', properties: {} }
+  })) || [];
+
+  const langInstruction = detectedLanguage?.name && detectedLanguage.name !== 'Auto-Detecting'
+    ? `\nThe user is communicating in ${detectedLanguage.name}. Respond clearly and naturally in ${detectedLanguage.name} (1 to 3 concise sentences ideal for real-time speech synthesis).`
+    : `\nKeep your answer direct, natural, and concise (1 to 3 sentences suitable for spoken voice output).`;
+
+  const body: any = {
+    model: 'claude-3-5-haiku-20241022',
+    max_tokens: 350,
+    system: `${IRONTHINKS_SYSTEM_DIRECTIVE}\n\n${persona.systemInstruction}${langInstruction}`,
+    messages: alternating.slice(-8)
+  };
+
+  if (tools.length > 0) {
+    body.tools = tools;
+  }
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': cleanKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[ClaudeInBrowser] Anthropic API HTTP ${res.status}:`, errText);
+      return null;
+    }
+
+    const data = await res.json();
+    let replyText = '';
+    let toolRecord: ToolAuditRecord | undefined;
+
+    if (Array.isArray(data.content)) {
+      for (const block of data.content) {
+        if (block.type === 'text') {
+          replyText += block.text;
+        } else if (block.type === 'tool_use') {
+          const { name: toolName, input: toolArgs } = block;
+          toolRecord = {
+            id: `tool_${Date.now()}`,
+            sessionId,
+            toolName,
+            arguments: toolArgs || {},
+            result: { status: 'success', executed: true, timestamp: new Date().toISOString() },
+            executionStatus: 'success',
+            executedAt: new Date().toISOString()
+          };
+
+          if (!replyText) {
+            if (toolName === 'bookAppointment') {
+              replyText = `I have scheduled your appointment for ${(toolArgs as any)?.selectedSlot || 'tomorrow'}. A confirmation has been recorded.`;
+            } else if (toolName === 'collectLeadInfo') {
+              replyText = `Thank you! I have securely recorded your contact details in our CRM. How else may I assist you today?`;
+            } else if (toolName === 'checkCalendar') {
+              replyText = `I checked our calendar. We have slots at 10:00 AM and 2:00 PM EST tomorrow. Which one would you prefer?`;
+            } else {
+              replyText = `I have executed the ${toolName} action for you.`;
+            }
+          }
+        }
+      }
+    }
+
+    if (replyText.trim()) {
+      return {
+        replyText: replyText.trim(),
+        toolRecord,
+        isDirectGemini: false,
+        aiProvider: 'Anthropic Claude'
+      };
+    }
+  } catch (err) {
+    console.warn('[ClaudeInBrowser] Network error calling Anthropic API:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Calls OpenAI Chat Completions API directly from the browser.
+ */
+async function callOpenAIApi({
+  apiKey,
+  persona,
+  userText,
+  history,
+  sessionId: _sessionId,
+  detectedLanguage
+}: {
+  apiKey: string;
+  persona: (typeof AGENT_PERSONAS)[PersonaId];
+  userText: string;
+  history: TranscriptEntry[];
+  sessionId?: string;
+  detectedLanguage?: { name: string; code: string };
+}): Promise<AgentGeneratedResult | null> {
+  const cleanKey = cleanApiKey(apiKey);
+  if (!cleanKey) return null;
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    {
+      role: 'system',
+      content: `${IRONTHINKS_SYSTEM_DIRECTIVE}\n\n${persona.systemInstruction}\nRespond in 1-3 concise spoken sentences in ${detectedLanguage?.name || 'English'}.`
+    }
+  ];
+
+  for (const item of history.slice(-6)) {
+    const text = item.content?.trim();
+    if (!text) continue;
+    messages.push({
+      role: item.speaker === 'user' ? 'user' : 'assistant',
+      content: text
+    });
+  }
+
+  const last = messages[messages.length - 1];
+  if (!last || last.content !== userText.trim()) {
+    messages.push({ role: 'user', content: userText.trim() });
+  }
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cleanKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages,
+        max_tokens: 300,
+        temperature: 0.7
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[OpenAIInBrowser] OpenAI API HTTP ${res.status}:`, errText);
+      return null;
+    }
+
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (content) {
+      return {
+        replyText: content.trim(),
+        isDirectGemini: false,
+        aiProvider: 'OpenAI ChatGPT'
+      };
+    }
+  } catch (err) {
+    console.warn('[OpenAIInBrowser] Error calling OpenAI API:', err);
+  }
+
+  return null;
 }
 
 /**
@@ -171,10 +533,16 @@ async function callGeminiFlashApi({
   history: TranscriptEntry[];
   sessionId: string;
 }): Promise<AgentGeneratedResult | null> {
-  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  const models = [
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
+    'gemini-2.5-flash'
+  ];
   const formattedContents = formatContentsForGemini(history, userText);
 
-  // Prepare function declarations
   const functionDeclarations = persona.tools?.map((t) => ({
     name: t.name,
     description: t.description,
@@ -183,7 +551,7 @@ async function callGeminiFlashApi({
 
   const body: any = {
     systemInstruction: {
-      parts: [{ text: persona.systemInstruction }]
+      parts: [{ text: `${IRONTHINKS_SYSTEM_DIRECTIVE}\n\n${persona.systemInstruction}` }]
     },
     contents: formattedContents,
     generationConfig: {
@@ -221,7 +589,6 @@ async function callGeminiFlashApi({
 
       if (!candidatePart) continue;
 
-      // Handle function calling
       if (candidatePart.functionCall) {
         const { name: toolName, args: toolArgs } = candidatePart.functionCall;
         const toolRecord: ToolAuditRecord = {
@@ -248,14 +615,16 @@ async function callGeminiFlashApi({
         return {
           replyText,
           toolRecord,
-          isDirectGemini: true
+          isDirectGemini: true,
+          aiProvider: 'Google Gemini'
         };
       }
 
       if (candidatePart.text) {
         return {
           replyText: candidatePart.text.trim(),
-          isDirectGemini: true
+          isDirectGemini: true,
+          aiProvider: 'Google Gemini'
         };
       }
     } catch (e) {
@@ -289,14 +658,9 @@ function runAutonomousAgentEngine({
   let toolRecord: ToolAuditRecord | undefined;
   let visualDiagram: { title: string; diagramType: string; contentSummary: string } | undefined;
 
-  // Inspect previous turn in history to maintain conversational context
   const lastModelMsg = [...history].reverse().find((h) => h.speaker === 'model')?.content?.toLowerCase() || '';
   const isAwaitingEmail = lastModelMsg.includes('email') || lastModelMsg.includes('correo') || lastModelMsg.includes('adresse');
   const isAwaitingSlot = lastModelMsg.includes('10:00') || lastModelMsg.includes('slot') || lastModelMsg.includes('time') || lastModelMsg.includes('heure');
-
-  // ==========================================
-  // COMMON GENERAL QUESTIONS & INTENTS (ALL PERSONAS)
-  // ==========================================
 
   // 1. Identity / Who are you / What is this
   if (
@@ -350,10 +714,13 @@ function runAutonomousAgentEngine({
     lower.startsWith('bonjour') ||
     lower.startsWith('guten tag') ||
     lower.startsWith('namaste') ||
+    lower.startsWith('namaskara') ||
     lower === 'hi' ||
     lower === 'hello'
   ) {
-    if (lang === 'Spanish') {
+    if (lang === 'Kannada') {
+      replyText = "ನಮಸ್ಕಾರ! ನಿಮ್ಮೊಂದಿಗೆ ಮಾತನಾಡಲು ನನಗೆ ಸಂತೋಷವಾಗಿದೆ. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?";
+    } else if (lang === 'Spanish') {
       replyText = "¡Hola! Es un placer saludarle. Estoy a su disposición para resolver sus dudas, brindarle información y ayudarle en lo que necesite. ¿En qué puedo asistirle hoy?";
     } else if (lang === 'French') {
       replyText = "Bonjour! Ravi de vous accueillir. Comment puis-je vous aider aujourd'hui?";
@@ -364,15 +731,89 @@ function runAutonomousAgentEngine({
     }
   }
 
-  // 5. Gratitude / Thanks
+  // 5. Kannada Language Switching / Command
+  else if (
+    lower.includes('kannada') ||
+    lower.includes('kannadadalli') ||
+    (lang === 'Kannada' && (lower.includes('switch') || lower.includes('speak') || lower.includes('language') || lower.includes('namaskara')))
+  ) {
+    replyText = "ಖಂಡಿತ, ನಾನು ಈಗ ನಿಮ್ಮೊಂದಿಗೆ ಕನ್ನಡದಲ್ಲಿ ಮಾತನಾಡುತ್ತೇನೆ. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?";
+  }
+
+  // 6. Time Inquiry
+  else if (
+    lower.includes('what is the time') ||
+    lower.includes('what time') ||
+    lower.includes('the time now') ||
+    lower.includes('current time') ||
+    lower === 'time'
+  ) {
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (lang === 'Kannada') {
+      replyText = `ಈಗ ಸಮಯ ${timeStr}. ನಾನು ನಿಮಗೆ ಇನ್ನೇನು ಸಹಾಯ ಮಾಡಲಿ?`;
+    } else if (lang === 'Hindi') {
+      replyText = `अभी समय ${timeStr} है। मैं आपकी और क्या मदद कर सकता हूँ?`;
+    } else {
+      replyText = `The current time is ${timeStr}. How can I assist you further?`;
+    }
+  }
+
+  // 7. Date Inquiry
+  else if (
+    lower.includes('date today') ||
+    lower.includes("what's the date") ||
+    lower.includes('what is the date') ||
+    lower.includes("today's date") ||
+    lower.includes('current date')
+  ) {
+    const dateStr = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    if (lang === 'Kannada') {
+      replyText = `ಇವತ್ತಿನ ದಿನಾಂಕ ${dateStr}.`;
+    } else if (lang === 'Hindi') {
+      replyText = `आज की तारीख ${dateStr} है।`;
+    } else {
+      replyText = `Today is ${dateStr}. How can I help you today?`;
+    }
+  }
+
+  // 8. Audibility / Microphone Check ("can you hear me")
+  else if (
+    lower.includes('can you hear me') ||
+    lower.includes('can you listen') ||
+    lower.includes('are you there') ||
+    lower.includes('are you listening')
+  ) {
+    if (lang === 'Kannada') {
+      replyText = "ಹೌದು, ನಾನು ನಿಮ್ಮ ಧ್ವನಿಯನ್ನು ಸ್ಪಷ್ಟವಾಗಿ ಕೇಳುತ್ತಿದ್ದೇನೆ! ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?";
+    } else if (lang === 'Hindi') {
+      replyText = "हाँ, मैं आपको बिल्कुल साफ़ सुन पा रहा हूँ! बताइए मैं आपकी क्या मदद कर सकता हूँ?";
+    } else {
+      replyText = "Yes, I can hear you loud and clear! How can I assist you right now?";
+    }
+  }
+
+  // 9. Link / Portal Sharing
+  else if (
+    lower.includes('send me the link') ||
+    lower.includes('send the link') ||
+    lower.includes('share the link') ||
+    lower.includes('give me the link')
+  ) {
+    replyText = "You can access our platform live at https://ironthinks.ai. If you'd like, provide your email and I will send the direct access portal and documentation to your inbox!";
+  }
+
+  // 10. Gratitude / Thanks
   else if (
     lower.includes('thank') ||
     lower.includes('gracias') ||
     lower.includes('merci') ||
     lower.includes('arigato') ||
-    lower.includes('dhanyawad')
+    lower.includes('dhanyawad') ||
+    lower.includes('dhanyavada')
   ) {
-    if (lang === 'Spanish') {
+    if (lang === 'Kannada') {
+      replyText = "ಧನ್ಯವಾದಗಳು! ನಿಮಗೆ ಬೇರೆ ಯಾವುದೇ ಪ್ರಶ್ನೆಗಳಿದ್ದರೆ ಖಂಡಿತ ಕೇಳಿ.";
+    } else if (lang === 'Spanish') {
       replyText = "¡Ha sido un auténtico placer! No dude en avisarme si tiene cualquier otra pregunta.";
     } else {
       replyText = "You're very welcome! Let me know if there's anything else I can help you with.";
@@ -536,7 +977,19 @@ function runAutonomousAgentEngine({
     }
     // 9.6 Dynamic, directly relevant answer to the user's specific prompt
     else {
-      replyText = `Regarding "${userText}": as your intake specialist, I can assist with answering questions about our voice platform, recording your project requirements, or scheduling a consultation demo. What would you like to explore next?`;
+      if (lower.includes('sab log') || lower.includes('kidhar') || lower.includes('kahan') || lower.includes('kaha')) {
+        replyText = "Sab log apne-apne kaamon mein vyast hain! Main aapki madad ke liye yahan hoon, bataiye main aapki kya madad kar sakta hoon?";
+      } else if (lower.includes('kaise ho') || lower.includes('kya haal')) {
+        replyText = "Main bilkul theek hoon! Aap bataiye, aap kaise hain aur main aapki kya madad kar sakta hoon?";
+      } else if (lower.includes('weather') || lower.includes('mausam')) {
+        replyText = "Live weather updates are currently unavailable on this channel, but you can check your local weather app. How else can I assist you?";
+      } else if (lang === 'Kannada') {
+        replyText = `ನಿಮ್ಮ ಪ್ರಶ್ನೆ "${userText}" ಗೆ: ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?`;
+      } else if (lang === 'Hindi') {
+        replyText = `Aapke sawaal "${userText}" ke baare mein: main aapki kis tarah se madad kar sakta hoon?`;
+      } else {
+        replyText = `Regarding "${userText}": I am right here and ready to help. What specific details would you like to explore?`;
+      }
     }
   }
 
@@ -544,6 +997,7 @@ function runAutonomousAgentEngine({
     replyText,
     toolRecord,
     visualDiagram,
-    isDirectGemini: false
+    isDirectGemini: false,
+    aiProvider: 'Autonomous Engine'
   };
 }
