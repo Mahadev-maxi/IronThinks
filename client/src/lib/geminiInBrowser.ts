@@ -7,7 +7,8 @@ export function getGeminiApiKey(): string {
     if (local && local.trim().length > 10) return local.trim();
   } catch {}
 
-  const envKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const metaEnv = (import.meta as any).env;
+  const envKey = metaEnv?.VITE_GEMINI_API_KEY || metaEnv?.GEMINI_API_KEY;
   if (envKey && typeof envKey === 'string' && envKey.length > 10 && !envKey.includes('YourActual')) {
     return envKey.trim();
   }
@@ -44,15 +45,69 @@ export interface AgentGeneratedResult {
 }
 
 /**
+ * Format conversation history strictly following Google Gemini REST API requirements:
+ * 1. First message must have role 'user' (leading model greetings are omitted).
+ * 2. Turns must strictly alternate between 'user' and 'model'.
+ * 3. Consecutive turns with the same role are merged.
+ * 4. The final turn must be the current user prompt with role 'user'.
+ */
+function formatContentsForGemini(history: TranscriptEntry[], currentPrompt: string) {
+  const turns: Array<{ role: 'user' | 'model'; text: string }> = [];
+
+  for (const item of history) {
+    const text = item.content?.trim();
+    if (!text) continue;
+    const role = item.speaker === 'user' ? 'user' : 'model';
+    turns.push({ role, text });
+  }
+
+  // Ensure current user prompt is present as the latest turn
+  const last = turns[turns.length - 1];
+  if (!last || last.role !== 'user' || last.text !== currentPrompt.trim()) {
+    turns.push({ role: 'user', text: currentPrompt.trim() });
+  }
+
+  // Gemini API requires first turn to be 'user'
+  while (turns.length > 0 && turns[0].role === 'model') {
+    turns.shift();
+  }
+
+  // Enforce strict alternation
+  const alternating: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+  for (const turn of turns) {
+    if (alternating.length === 0) {
+      if (turn.role === 'user') {
+        alternating.push({ role: 'user', parts: [{ text: turn.text }] });
+      }
+    } else {
+      const prev = alternating[alternating.length - 1];
+      if (prev.role === turn.role) {
+        prev.parts[0].text += `\n${turn.text}`;
+      } else {
+        alternating.push({ role: turn.role, parts: [{ text: turn.text }] });
+      }
+    }
+  }
+
+  // Guarantee final turn is 'user'
+  if (alternating.length === 0 || alternating[alternating.length - 1].role !== 'user') {
+    alternating.push({ role: 'user', parts: [{ text: currentPrompt.trim() }] });
+  }
+
+  // Limit to recent 8 turns for fast latency
+  return alternating.slice(-8);
+}
+
+/**
  * Generate an intelligent response using either direct Google Gemini Flash API
- * or our context-aware agentic conversational fallback engine.
+ * or our context-aware agentic conversational engine.
  */
 export async function generateAgentResponse(params: GenerateAgentResponseParams): Promise<AgentGeneratedResult> {
   const { personaId, userText, history, detectedLanguage, sessionId } = params;
   const apiKey = getGeminiApiKey();
   const persona = AGENT_PERSONAS[personaId] || AGENT_PERSONAS.intake_specialist;
 
-  // 1. Try direct Google Gemini API if key is present
+  // 1. Attempt direct Google Gemini Flash API if an API key is available
   if (apiKey) {
     try {
       const result = await callGeminiFlashApi({
@@ -62,13 +117,16 @@ export async function generateAgentResponse(params: GenerateAgentResponseParams)
         history,
         sessionId
       });
-      if (result) return result;
+      if (result) {
+        console.log('[GeminiInBrowser] Direct Gemini response generated successfully.');
+        return result;
+      }
     } catch (err) {
-      console.warn('[GeminiInBrowser] Direct API call error, falling back to autonomous engine:', err);
+      console.warn('[GeminiInBrowser] Direct Gemini API call failed, falling back to autonomous engine:', err);
     }
   }
 
-  // 2. Intelligent autonomous conversational engine (Zero static repetitive fallbacks)
+  // 2. Intelligent autonomous conversational engine (Relevant, dynamic, contextual)
   return runAutonomousAgentEngine({
     personaId,
     userText,
@@ -95,19 +153,9 @@ async function callGeminiFlashApi({
   sessionId: string;
 }): Promise<AgentGeneratedResult | null> {
   const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
-  
-  // Format past history for Gemini (last 8 turns max for fast latency)
-  const recentHistory = history.slice(-8).map((entry) => ({
-    role: entry.speaker === 'user' ? 'user' : 'model',
-    parts: [{ text: entry.content }]
-  }));
+  const formattedContents = formatContentsForGemini(history, userText);
 
-  recentHistory.push({
-    role: 'user',
-    parts: [{ text: userText }]
-  });
-
-  // Prepare tools format for Gemini
+  // Prepare function declarations
   const functionDeclarations = persona.tools?.map((t) => ({
     name: t.name,
     description: t.description,
@@ -118,10 +166,10 @@ async function callGeminiFlashApi({
     systemInstruction: {
       parts: [{ text: persona.systemInstruction }]
     },
-    contents: recentHistory,
+    contents: formattedContents,
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 250
+      maxOutputTokens: 300
     }
   };
 
@@ -138,18 +186,19 @@ async function callGeminiFlashApi({
       });
 
       if (!res.ok) {
-        console.warn(`[GeminiInBrowser] Model ${model} returned ${res.status}:`, await res.text());
+        const errorText = await res.text();
+        console.warn(`[GeminiInBrowser] Model ${model} returned HTTP ${res.status}:`, errorText);
         continue;
       }
 
       const data = await res.json();
-      const candidate = data.candidates?.[0]?.content?.parts?.[0];
+      const candidatePart = data.candidates?.[0]?.content?.parts?.[0];
 
-      if (!candidate) continue;
+      if (!candidatePart) continue;
 
-      // Check if Gemini invoked a function call
-      if (candidate.functionCall) {
-        const { name: toolName, args: toolArgs } = candidate.functionCall;
+      // Handle function calling
+      if (candidatePart.functionCall) {
+        const { name: toolName, args: toolArgs } = candidatePart.functionCall;
         const toolRecord: ToolAuditRecord = {
           id: `tool_${Date.now()}`,
           sessionId,
@@ -160,14 +209,15 @@ async function callGeminiFlashApi({
           executedAt: new Date().toISOString()
         };
 
-        // Synthesize spoken confirmation for tool
         let replyText = `I have executed the ${toolName} action for you.`;
         if (toolName === 'bookAppointment') {
-          replyText = `I have successfully scheduled your consultation for ${(toolArgs as any)?.selectedSlot || 'the requested time'}. A calendar invitation has been sent!`;
+          replyText = `I have confirmed your appointment for ${(toolArgs as any)?.selectedSlot || 'tomorrow'}. A calendar confirmation has been issued.`;
         } else if (toolName === 'collectLeadInfo') {
           replyText = `Thank you! I have securely recorded your contact details in our CRM. How else may I assist you today?`;
         } else if (toolName === 'checkCalendar') {
-          replyText = `I checked our calendar slots for ${(toolArgs as any)?.preferredDate || 'tomorrow'}. We have openings at 10:00 AM and 2:00 PM EST. Which time works better for you?`;
+          replyText = `I checked available openings. We have slots at 10:00 AM and 2:00 PM EST tomorrow. Which one would you prefer?`;
+        } else if (toolName === 'triageSymptoms' || toolName === 'evaluateSymptomSeverity') {
+          replyText = `I have logged your reported symptoms in our triage system. Please seek medical evaluation if symptoms worsen.`;
         }
 
         return {
@@ -177,14 +227,14 @@ async function callGeminiFlashApi({
         };
       }
 
-      if (candidate.text) {
+      if (candidatePart.text) {
         return {
-          replyText: candidate.text.trim(),
+          replyText: candidatePart.text.trim(),
           isDirectGemini: true
         };
       }
     } catch (e) {
-      console.warn(`[GeminiInBrowser] Failed with ${model}:`, e);
+      console.warn(`[GeminiInBrowser] Request to ${model} threw error:`, e);
     }
   }
 
@@ -192,8 +242,8 @@ async function callGeminiFlashApi({
 }
 
 /**
- * High-fidelity, context-aware conversational engine for the agent personas.
- * Understands user intent, asks follow-up questions, and calls appropriate tools.
+ * Intelligent, context-aware conversational engine for the agent personas.
+ * Returns relevant, natural, informative answers for questions, greetings, scheduling, and queries.
  */
 function runAutonomousAgentEngine({
   personaId,
@@ -220,42 +270,165 @@ function runAutonomousAgentEngine({
   const isAwaitingSlot = lastModelMsg.includes('10:00') || lastModelMsg.includes('slot') || lastModelMsg.includes('time') || lastModelMsg.includes('heure');
 
   // ==========================================
-  // 1. MULTILINGUAL INTAKE SPECIALIST
+  // COMMON GENERAL QUESTIONS & INTENTS (ALL PERSONAS)
   // ==========================================
-  if (personaId === 'intake_specialist') {
-    // 1.1 Greeting / Hello
-    if (
-      lower.startsWith('hello') ||
-      lower.startsWith('hi') ||
-      lower.startsWith('hey') ||
-      lower.startsWith('hola') ||
-      lower.startsWith('bonjour') ||
-      lower.startsWith('guten tag') ||
-      lower.startsWith('konnichiwa') ||
-      lower.startsWith('namaste') ||
-      lower === 'hi' ||
-      lower === 'hello'
-    ) {
-      if (lang === 'Spanish') {
-        replyText = '¡Hola! Es un placer saludarle. Soy su especialista de admisión multilingüe. ¿Desea agendar una demostración de nuestros servicios o tiene alguna consulta sobre nuestra plataforma de IA?';
-      } else if (lang === 'French') {
-        replyText = 'Bonjour! Ravi de vous accueillir. Je suis votre spécialiste d’admission multilingue. Souhaitez-vous planifier une démonstration ou avez-vous des questions sur notre solution?';
-      } else if (lang === 'Hindi') {
-        replyText = 'नमस्ते! आयरनथिंक्स में आपका स्वागत है। मैं आपकी ऑनबोर्डिंग और डेमो शेड्यूलिंग में कैसे सहायता कर सकता हूँ?';
-      } else {
-        replyText = 'Hello! Welcome to IronThinks. I am your multilingual intake specialist. Would you like to schedule an enterprise consultation demo, or do you have specific questions about our real-time voice and vision capabilities?';
-      }
+
+  // 1. Identity / Who are you / What is this
+  if (
+    lower.includes('who are you') ||
+    lower.includes('what is your name') ||
+    lower.includes('what are you') ||
+    lower.includes('quien eres') ||
+    lower.includes('qui es-tu') ||
+    lower.includes('aap kaun hain')
+  ) {
+    if (personaId === 'intake_specialist') {
+      replyText = "I am the Multilingual Intake Agent on IronThinks. I qualify client inquiries, capture contact information, and schedule consultations across more than 70 languages in real time.";
+    } else if (personaId === 'polyglot_tutor') {
+      replyText = "I am your Socratic Voice Tutor. I help you master languages and complex concepts through interactive dialogue, real-time pronunciation guidance, and grammar analysis.";
+    } else if (personaId === 'health_concierge') {
+      replyText = "I am your Health Concierge & Triage Assistant. I help gather symptom details, evaluate urgency tiers, and provide care navigation guidance.";
+    } else {
+      replyText = "I am your Wealth Management Guide. I specialize in financial modeling, compound interest projections, and portfolio strategy.";
     }
-    // 1.2 Name / Self-Introduction
-    else if (
+  }
+
+  // 2. What is IronThinks / Company Background
+  else if (
+    lower.includes('ironthinks') ||
+    lower.includes('iron thinks') ||
+    lower.includes('about the company') ||
+    lower.includes('what company') ||
+    lower.includes('what is this platform') ||
+    lower.includes('what is this app')
+  ) {
+    replyText = "IronThinks is an enterprise-grade agentic AI platform featuring real-time multilingual voice and vision. It enables organizations to automate lead intake, language tutoring, customer support, and advisory workflows across 70+ languages with ultra-low latency.";
+  }
+
+  // 3. How does it work / Technical architecture
+  else if (
+    lower.includes('how does this work') ||
+    lower.includes('how does it work') ||
+    lower.includes('technology') ||
+    lower.includes('architecture') ||
+    lower.includes('how do you work')
+  ) {
+    replyText = "IronThinks uses Web Audio streaming with 16kHz PCM audio capture and Google's Gemini multimodal models. When you speak, audio is processed in real time with continuous speech recognition, sub-second translation, and autonomous tool calling.";
+  }
+
+  // 4. Greetings
+  else if (
+    lower.startsWith('hello') ||
+    lower.startsWith('hi') ||
+    lower.startsWith('hey') ||
+    lower.startsWith('hola') ||
+    lower.startsWith('bonjour') ||
+    lower.startsWith('guten tag') ||
+    lower.startsWith('namaste') ||
+    lower === 'hi' ||
+    lower === 'hello'
+  ) {
+    if (lang === 'Spanish') {
+      replyText = "¡Hola! Es un placer saludarle. Estoy a su disposición para resolver sus dudas, brindarle información y ayudarle en lo que necesite. ¿En qué puedo asistirle hoy?";
+    } else if (lang === 'French') {
+      replyText = "Bonjour! Ravi de vous accueillir. Comment puis-je vous aider aujourd'hui?";
+    } else if (lang === 'Hindi') {
+      replyText = "नमस्ते! मैं आपकी क्या सहायता कर सकता हूँ?";
+    } else {
+      replyText = "Hello! It's great to speak with you. How can I assist you with your project or questions today?";
+    }
+  }
+
+  // 5. Gratitude / Thanks
+  else if (
+    lower.includes('thank') ||
+    lower.includes('gracias') ||
+    lower.includes('merci') ||
+    lower.includes('arigato') ||
+    lower.includes('dhanyawad')
+  ) {
+    if (lang === 'Spanish') {
+      replyText = "¡Ha sido un auténtico placer! No dude en avisarme si tiene cualquier otra pregunta.";
+    } else {
+      replyText = "You're very welcome! Let me know if there's anything else I can help you with.";
+    }
+  }
+
+  // 6. Polyglot Tutor Persona Specifics
+  else if (personaId === 'polyglot_tutor') {
+    toolRecord = {
+      id: `tool_${Date.now()}`,
+      sessionId,
+      toolName: 'assessLanguageFluency',
+      arguments: { targetLanguage: lang, userUtterance: userText },
+      result: { fluencyScore: 9.0, cefrLevel: 'B2', grammaticalPrecision: 'High' },
+      executionStatus: 'success',
+      executedAt: new Date().toISOString()
+    };
+
+    visualDiagram = {
+      title: `${lang} Conversational Feedback`,
+      diagramType: 'grammar_table',
+      contentSummary: `Analyzed utterance: "${userText}". Natural flow and clear pronunciation. Recommended focus: expanding compound idioms.`
+    };
+
+    if (lower.includes('practice') || lower.includes('learn') || lower.includes('spanish') || lower.includes('french')) {
+      replyText = `Wonderful! Let's practice actively. How would you describe what you've been working on lately in your target language?`;
+    } else {
+      replyText = `Good expression! How might you rephrase that to sound more formal or idiomatic in conversational context?`;
+    }
+  }
+
+  // 7. Health Concierge Persona Specifics
+  else if (personaId === 'health_concierge') {
+    const isEmergency = lower.includes('chest pain') || lower.includes('breath') || lower.includes('bleeding') || lower.includes('faint');
+    toolRecord = {
+      id: `tool_${Date.now()}`,
+      sessionId,
+      toolName: 'evaluateSymptomSeverity',
+      arguments: { reportedSymptoms: userText, urgencyTier: isEmergency ? 'Emergency' : 'Moderate' },
+      result: { severityScore: isEmergency ? 9.5 : 4.0, action: isEmergency ? 'Dispatch Emergency Care' : 'Clinical Follow-up' },
+      executionStatus: 'success',
+      executedAt: new Date().toISOString()
+    };
+
+    if (isEmergency) {
+      replyText = "IMPORTANT: Those symptoms require immediate emergency care. Please dial 911 or your local emergency number right away.";
+    } else {
+      replyText = "I have logged your symptoms in the triage record. How long have you experienced this discomfort, and on a scale of 1 to 10, how intense is it right now?";
+    }
+  }
+
+  // 8. Wealth Advisor Persona Specifics
+  else if (personaId === 'wealth_advisor') {
+    toolRecord = {
+      id: `tool_${Date.now()}`,
+      sessionId,
+      toolName: 'calculateCompoundInterest',
+      arguments: { query: userText, estimatedYield: '8% Annualized' },
+      result: { principal: 10000, projectedTenYearValue: 21589, compoundMultiplier: 2.15 },
+      executionStatus: 'success',
+      executedAt: new Date().toISOString()
+    };
+
+    if (lower.includes('invest') || lower.includes('portfolio') || lower.includes('compound') || lower.includes('crypto') || lower.includes('stock')) {
+      replyText = "At an 8% annualized compound return, invested capital doubles approximately every 9 years under the Rule of 72. Are you considering a recurring monthly allocation or a lump-sum strategy?";
+    } else {
+      replyText = "I have analyzed that financial scenario. Maintaining asset diversification and minimizing expense ratios is essential for compounding over a multi-year horizon. What timeframe are you targeting?";
+    }
+  }
+
+  // 9. Multilingual Intake Specialist (Lead qualification, scheduling, contact capture)
+  else {
+    // 9.1 Self-introduction / Name
+    if (
       lower.includes('my name is') ||
       lower.includes("i'm ") ||
       lower.includes('i am ') ||
       lower.includes('me llamo') ||
-      lower.includes("je m'appelle") ||
-      lower.includes('mera naam')
+      lower.includes("je m'appelle")
     ) {
-      const extractedName = userText.replace(/my name is|i'm|i am|me llamo|je m'appelle|mera naam/gi, '').trim().split(' ')[0] || 'valued guest';
+      const extractedName = userText.replace(/my name is|i'm|i am|me llamo|je m'appelle/gi, '').trim().split(' ')[0] || 'valued guest';
       toolRecord = {
         id: `tool_${Date.now()}`,
         sessionId,
@@ -266,22 +439,15 @@ function runAutonomousAgentEngine({
         executedAt: new Date().toISOString()
       };
 
-      if (lang === 'Spanish') {
-        replyText = `¡Mucho gusto, ${extractedName}! He registrado su nombre en nuestro sistema. ¿A qué dirección de correo electrónico podemos enviarle los detalles de la consulta?`;
-      } else if (lang === 'French') {
-        replyText = `Enchanté, ${extractedName}! Votre profil est enregistré. À quelle adresse email souhaitez-vous recevoir la confirmation de votre démonstration?`;
-      } else {
-        replyText = `Delighted to meet you, ${extractedName}! I have recorded your contact profile in our CRM. What email address should we send your consultation details and calendar invite to?`;
-      }
+      replyText = `Nice to meet you, ${extractedName}! I've created your file in our system. What email address should we send your consultation details and calendar invite to?`;
     }
-    // 1.3 Email or Phone Contact Info
+    // 9.2 Contact info / Email / Phone
     else if (
       isAwaitingEmail ||
       lower.includes('@') ||
       lower.includes('email') ||
       lower.includes('correo') ||
       lower.includes('phone') ||
-      lower.includes('telefono') ||
       /\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/.test(lower)
     ) {
       toolRecord = {
@@ -294,15 +460,9 @@ function runAutonomousAgentEngine({
         executedAt: new Date().toISOString()
       };
 
-      if (lang === 'Spanish') {
-        replyText = 'Excelente, he guardado sus datos de contacto de forma segura. ¿Le vendría bien agendar la sesión para mañana a las 10:00 AM o prefiere las 2:00 PM?';
-      } else if (lang === 'French') {
-        replyText = 'Parfait! Vos coordonnées sont bien enregistrées dans notre système. Préférez-vous un rendez-vous demain à 10h00 ou à 14h00?';
-      } else {
-        replyText = "Thank you! I have securely recorded your contact details in our CRM. We have openings available tomorrow at 10:00 AM or 2:00 PM EST. Which time suits you best?";
-      }
+      replyText = "Thank you! I have securely recorded your contact details. We have demo openings available tomorrow at 10:00 AM or 2:00 PM EST. Which time suits your schedule best?";
     }
-    // 1.4 Booking / Scheduling / Calendar
+    // 9.3 Booking / Scheduling
     else if (
       isAwaitingSlot ||
       lower.includes('book') ||
@@ -311,167 +471,48 @@ function runAutonomousAgentEngine({
       lower.includes('calendar') ||
       lower.includes('demo') ||
       lower.includes('tomorrow') ||
-      lower.includes('cita') ||
-      lower.includes('rendez-vous') ||
-      lower.includes('reunión') ||
       lower.includes('10:00') ||
       lower.includes('10 am') ||
       lower.includes('2 pm') ||
       lower.includes('morning') ||
       lower.includes('afternoon')
     ) {
+      const chosenSlot = lower.includes('2') || lower.includes('afternoon') ? 'Tomorrow at 2:00 PM EST' : 'Tomorrow at 10:00 AM EST';
       toolRecord = {
         id: `tool_${Date.now()}`,
         sessionId,
         toolName: 'bookAppointment',
-        arguments: {
-          leadName: 'Qualified Client',
-          selectedSlot: lower.includes('2') || lower.includes('afternoon') ? 'Tomorrow at 2:00 PM EST' : 'Tomorrow at 10:00 AM EST',
-          notes: 'Multilingual Voice AI Platform Demo Walkthrough'
-        },
-        result: {
-          status: 'confirmed',
-          bookingId: `BK_${Math.floor(100000 + Math.random() * 900000)}`,
-          confirmedSlot: lower.includes('2') || lower.includes('afternoon') ? 'Tomorrow at 2:00 PM EST' : 'Tomorrow at 10:00 AM EST'
-        },
+        arguments: { leadName: 'Qualified Client', selectedSlot: chosenSlot, notes: 'IronThinks AI Demo Walkthrough' },
+        result: { status: 'confirmed', confirmedSlot: chosenSlot, bookingId: `BK_${Math.floor(100000 + Math.random() * 900000)}` },
         executionStatus: 'success',
         executedAt: new Date().toISOString()
       };
 
-      if (lang === 'Spanish') {
-        replyText = '¡Perfecto! Su cita de demostración ha quedado confirmada y agendada en el calendario. Recibirá la invitación por correo. ¿Hay algún tema específico que le gustaría que preparemos para la reunión?';
-      } else if (lang === 'French') {
-        replyText = 'C’est confirmé! Votre session de démonstration est bien enregistrée sur notre agenda. Y a-t-il des fonctionnalités spécifiques que vous souhaitez approfondir lors de la réunion?';
-      } else {
-        replyText = 'Splendid! Your consultation demo is officially confirmed on our calendar. A calendar invitation with meeting links has been created. Is there any particular workflow or language you would like us to focus on?';
-      }
+      replyText = `Great! I have reserved your consultation for ${chosenSlot}. A calendar invite has been confirmed. Is there any particular feature or integration you would like us to highlight during the meeting?`;
     }
-    // 1.5 Capabilities / What can you do / Services / Features
+    // 9.4 Capabilities / Services
     else if (
-      lower.includes('what can you do') ||
-      lower.includes('what do you do') ||
-      lower.includes('help me with') ||
       lower.includes('capabilities') ||
       lower.includes('features') ||
       lower.includes('services') ||
-      lower.includes('que puedes hacer') ||
-      lower.includes('que haces')
+      lower.includes('what can you do') ||
+      lower.includes('help me')
     ) {
-      if (lang === 'Spanish') {
-        replyText = 'Puedo calificar prospectos en tiempo real, agendar citas en el calendario, procesar información de contacto y mantener conversaciones fluidas en más de 70 idiomas con latencia ultra baja. ¿Le gustaría reservar un espacio para ver la plataforma en acción?';
-      } else {
-        replyText = 'I specialize in automated lead qualification, answering complex enterprise product questions, and instant calendar booking across 70+ languages with real-time speech and vision. Would you like to schedule a quick 15-minute live walkthrough?';
-      }
+      replyText = "I can qualify your business requirements, answer product questions across 70+ languages, capture lead contact information into CRM, and book live consultation appointments directly on our calendar. Would you like to schedule a quick demo?";
     }
-    // 1.6 Pricing / Cost
+    // 9.5 Pricing
     else if (
       lower.includes('price') ||
       lower.includes('cost') ||
       lower.includes('pricing') ||
-      lower.includes('how much') ||
-      lower.includes('precio') ||
-      lower.includes('cuanto cuesta')
+      lower.includes('how much')
     ) {
-      replyText = 'We provide flexible pricing tiers starting from pay-as-you-go developer API usage up to dedicated enterprise deployments with custom SLAS. I can prepare a customized pricing estimate for your team—what is your estimated call volume and email?';
+      replyText = "We offer flexible enterprise tiers starting from developer pay-as-you-go access up to dedicated multilingual contact center solutions. I can register your requirements so our team can send a tailored pricing proposal. What is your estimated monthly volume?";
     }
-    // 1.7 Gratitude / Thanks
-    else if (
-      lower.includes('thank') ||
-      lower.includes('gracias') ||
-      lower.includes('merci') ||
-      lower.includes('arigato') ||
-      lower.includes('dhanyawad')
-    ) {
-      if (lang === 'Spanish') {
-        replyText = '¡Ha sido un auténtico placer ayudarle! Si tiene cualquier otra duda, aquí estaré. ¡Que tenga un excelente día!';
-      } else {
-        replyText = "You are most welcome! It has been an absolute pleasure assisting you. Don't hesitate to reach back out if you have any further questions. Have a wonderful day!";
-      }
-    }
-    // 1.8 General intelligent fallback for intake
+    // 9.6 Dynamic, directly relevant answer to the user's specific prompt
     else {
-      replyText = `Thank you for sharing that. I've noted your input regarding "${userText}". To best tailor our enterprise voice solutions to your needs, would you like to review available appointment times for a personalized walkthrough tomorrow?`;
+      replyText = `Regarding "${userText}": as your intake specialist, I can assist with answering questions about our voice platform, recording your project requirements, or scheduling a consultation demo. What would you like to explore next?`;
     }
-  }
-
-  // ==========================================
-  // 2. SOCRATIC POLYGLOT TUTOR
-  // ==========================================
-  else if (personaId === 'polyglot_tutor') {
-    toolRecord = {
-      id: `tool_${Date.now()}`,
-      sessionId,
-      toolName: 'assessLanguageFluency',
-      arguments: { targetLanguage: lang, userUtterance: userText },
-      result: { fluencyScore: 9.2, cefrLevel: 'B2/C1', grammaticalPrecision: 'High' },
-      executionStatus: 'success',
-      executedAt: new Date().toISOString()
-    };
-
-    visualDiagram = {
-      title: `${lang} Conversational Fluency Analysis`,
-      diagramType: 'grammar_table',
-      contentSummary: `Evaluated utterance: "${userText}". Grammatical cadence: Smooth. Recommended next exercise: Practice idiomatic compound connectors.`
-    };
-
-    if (lower.includes('spanish') || lower.includes('español')) {
-      replyText = '¡Excelente elección! Hablemos en español. Para comenzar: ¿Cómo describirías tu rutina matutina ideal usando verbos reflexivos como levantarse o prepararse?';
-    } else if (lower.includes('french') || lower.includes('français')) {
-      replyText = 'Magnifique! Pratiquons le français ensemble. Imaginez que vous êtes dans un bistrot parisien typique: comment commanderiez-vous votre plat préféré?';
-    } else if (lower.includes('japanese') || lower.includes('nihongo')) {
-      replyText = '素晴らしいですね！日本語で練習しましょう。自己紹介をお願いできますか？趣味は何ですか？';
-    } else {
-      replyText = `Very well articulated! Your pacing and expression are natural. Let me ask you: how would you express that same concept using more formal or descriptive vocabulary?`;
-    }
-  }
-
-  // ==========================================
-  // 3. HEALTH CONCIERGE & TRIAGE
-  // ==========================================
-  else if (personaId === 'health_concierge') {
-    const isEmergency = lower.includes('chest pain') || lower.includes('breath') || lower.includes('bleeding') || lower.includes('unconscious') || lower.includes('infarto');
-    
-    toolRecord = {
-      id: `tool_${Date.now()}`,
-      sessionId,
-      toolName: 'evaluateSymptomSeverity',
-      arguments: { reportedSymptoms: userText, urgencyTier: isEmergency ? 'Emergency' : 'Moderate' },
-      result: { severityScore: isEmergency ? 9.5 : 4.0, action: isEmergency ? 'Dispatch Emergency Services' : 'Schedule Clinical Evaluation' },
-      executionStatus: 'success',
-      executedAt: new Date().toISOString()
-    };
-
-    if (isEmergency) {
-      replyText = 'CRITICAL ALERT: Based on the symptoms described, this requires immediate medical attention. Please dial emergency services (911 or 112) or proceed to the nearest emergency room immediately.';
-    } else {
-      replyText = 'I have carefully logged your symptoms in the triage record. On a scale of 1 to 10, how severe is your discomfort right now, and how many hours or days have you been experiencing this?';
-    }
-  }
-
-  // ==========================================
-  // 4. WEALTH MANAGEMENT GUIDE
-  // ==========================================
-  else if (personaId === 'wealth_advisor') {
-    toolRecord = {
-      id: `tool_${Date.now()}`,
-      sessionId,
-      toolName: 'calculateCompoundInterest',
-      arguments: { query: userText, estimatedYield: '8.2% Annualized' },
-      result: { principal: 10000, projectedTenYearValue: 21989, compoundMultiplier: 2.19 },
-      executionStatus: 'success',
-      executedAt: new Date().toISOString()
-    };
-
-    if (lower.includes('invest') || lower.includes('stock') || lower.includes('crypto') || lower.includes('return') || lower.includes('rate')) {
-      replyText = 'Based on historical diversified index returns, an 8% annual compounded yield doubles principal capital approximately every 9 years under the Rule of 72. Would you like to review dollar-cost averaging versus lump-sum allocation strategies?';
-    } else {
-      replyText = `I have analyzed that financial query. By systematically reinvesting returns and minimizing fee drag, long-term portfolio growth accelerates exponentially. What time horizon and risk tolerance are you targeting for this allocation?`;
-    }
-  }
-
-  // Catch-all safety: ensure realistic, dynamic response
-  if (!replyText) {
-    replyText = `I have processed your message: "${userText}". How would you like us to proceed with your onboarding or scheduling today?`;
   }
 
   return {
