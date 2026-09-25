@@ -1,0 +1,48 @@
+{
+  "name": "gemini-agentic-multilingual-voice-platform",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Production-grade Real-Time AI Agentic Multilingual Voice & Multimodal Platform using Gemini Live API, Supabase, Express, and React",
+  "main": "server/index.ts",
+  "scripts": {
+    "dev": "concurrently -k -p \"[{name}]\" -n \"SERVER,CLIENT\" -c \"cyan.bold,magenta.bold\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build && tsc -p server/tsconfig.json",
+    "start": "node dist/server/index.js",
+    "migrate": "node scripts/migrate.js"
+  },
+  "keywords": [
+    "gemini",
+    "webrtc",
+    "websocket",
+    "agentic",
+    "multilingual",
+    "pcm-audio",
+    "supabase",
+    "react",
+    "express"
+  ],
+  "author": "Ironthinks Agentic AI Team",
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "@supabase/supabase-js": "^2.49.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.3",
+    "ws": "^8.18.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.9",
+    "@types/pg": "^8.11.11",
+    "@types/ws": "^8.5.14",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
