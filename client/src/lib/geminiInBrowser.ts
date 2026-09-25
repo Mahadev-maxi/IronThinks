@@ -1,26 +1,45 @@
 import type { PersonaId, ToolAuditRecord, TranscriptEntry } from '../../../shared/schemas';
 import { AGENT_PERSONAS } from '../../../server/config/agentPersonas';
 
+export function cleanApiKey(raw: string): string {
+  if (!raw) return '';
+  let cleaned = raw.trim();
+  // Strip any prepended variable names like GEMINI_API_KEY= or VITE_GEMINI_API_KEY= or API_KEY=
+  cleaned = cleaned.replace(/^(?:VITE_)?GEMINI_API_KEY\s*[:=]\s*/i, '');
+  cleaned = cleaned.replace(/^API_KEY\s*[:=]\s*/i, '');
+  // Strip surrounding quotes
+  cleaned = cleaned.replace(/^["']|["']$/g, '');
+  return cleaned.trim();
+}
+
 export function getGeminiApiKey(): string {
   try {
     const local = localStorage.getItem('gemini_api_key') || localStorage.getItem('VITE_GEMINI_API_KEY');
-    if (local && local.trim().length > 10) return local.trim();
+    if (local) {
+      const cleaned = cleanApiKey(local);
+      if (cleaned.length > 5) return cleaned;
+    }
   } catch {}
 
   const metaEnv = (import.meta as any).env;
   const envKey = metaEnv?.VITE_GEMINI_API_KEY || metaEnv?.GEMINI_API_KEY;
-  if (envKey && typeof envKey === 'string' && envKey.length > 10 && !envKey.includes('YourActual')) {
-    return envKey.trim();
+  if (envKey && typeof envKey === 'string') {
+    const cleaned = cleanApiKey(envKey);
+    if (cleaned.length > 5 && !cleaned.includes('YourActual')) {
+      return cleaned;
+    }
   }
   return '';
 }
 
 export function setGeminiApiKey(key: string): void {
   try {
-    if (!key || !key.trim()) {
+    const cleaned = cleanApiKey(key);
+    if (!cleaned) {
       localStorage.removeItem('gemini_api_key');
+      localStorage.removeItem('VITE_GEMINI_API_KEY');
     } else {
-      localStorage.setItem('gemini_api_key', key.trim());
+      localStorage.setItem('gemini_api_key', cleaned);
     }
   } catch {}
 }
@@ -177,11 +196,17 @@ async function callGeminiFlashApi({
     body.tools = [{ functionDeclarations }];
   }
 
+  const cleanKey = cleanApiKey(apiKey);
+  if (!cleanKey) return null;
+
   for (const model of models) {
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanKey)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
         body: JSON.stringify(body)
       });
 

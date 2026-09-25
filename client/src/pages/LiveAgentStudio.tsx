@@ -11,7 +11,7 @@ import { MediaControls } from '../components/MediaControls';
 import { getPersonaConfig } from '../../../server/config/agentPersonas';
 import type { PersonaId, GeminiVoice, SessionMode } from '../../../shared/schemas';
 import { Clock, AlertCircle, Sparkles, X, ExternalLink } from 'lucide-react';
-import { getGeminiApiKey, setGeminiApiKey, hasGeminiApiKey } from '../lib/geminiInBrowser';
+import { getGeminiApiKey, setGeminiApiKey, hasGeminiApiKey, cleanApiKey } from '../lib/geminiInBrowser';
 
 export const LiveAgentStudio: React.FC = () => {
   const { personaId = 'intake_specialist' } = useParams<{ personaId: PersonaId }>();
@@ -31,8 +31,10 @@ export const LiveAgentStudio: React.FC = () => {
   const [hasKey, setHasKey] = useState<boolean>(hasGeminiApiKey());
 
   const handleSaveApiKey = () => {
-    setGeminiApiKey(apiKeyInput);
-    setHasKey(hasGeminiApiKey());
+    const cleaned = cleanApiKey(apiKeyInput);
+    setGeminiApiKey(cleaned);
+    setApiKeyInput(cleaned);
+    setHasKey(Boolean(cleaned));
     setShowKeyModal(false);
   };
 
@@ -202,10 +204,15 @@ export const LiveAgentStudio: React.FC = () => {
               <input
                 type="password"
                 value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                placeholder="AIzaSy... (Paste Gemini API Key)"
+                onChange={(e) => setApiKeyInput(cleanApiKey(e.target.value))}
+                placeholder="AIzaSy... (Paste Gemini API Key from Google AI Studio)"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-brand-500"
               />
+              {apiKeyInput && !apiKeyInput.startsWith('AIzaSy') && (
+                <p className="text-[11px] text-amber-400">
+                  Note: Google AI Studio API keys typically begin with &apos;AIzaSy...&apos;. Verify yours at aistudio.google.com/apikey.
+                </p>
+              )}
               <div className="flex items-center justify-between text-[11px] text-slate-400">
                 <a
                   href="https://aistudio.google.com/apikey"

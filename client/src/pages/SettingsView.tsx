@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Mic, Camera, Sliders, CheckCircle2, Shield, Radio, Key, Sparkles, ExternalLink } from 'lucide-react';
 import { apiGetHealth } from '../lib/api';
-import { getGeminiApiKey, setGeminiApiKey } from '../lib/geminiInBrowser';
+import { getGeminiApiKey, setGeminiApiKey, cleanApiKey } from '../lib/geminiInBrowser';
 import type { GeminiVoice } from '../../../shared/schemas';
 
 export const SettingsView: React.FC = () => {
@@ -39,7 +39,9 @@ export const SettingsView: React.FC = () => {
   const handleSave = () => {
     localStorage.setItem('pref_voice', defaultVoice);
     localStorage.setItem('pref_sensitivity', sensitivity.toString());
-    setGeminiApiKey(geminiKey);
+    const cleaned = cleanApiKey(geminiKey);
+    setGeminiApiKey(cleaned);
+    setGeminiKeyState(cleaned);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -95,7 +97,7 @@ export const SettingsView: React.FC = () => {
               <input
                 type={showKey ? 'text' : 'password'}
                 value={geminiKey}
-                onChange={(e) => setGeminiKeyState(e.target.value)}
+                onChange={(e) => setGeminiKeyState(cleanApiKey(e.target.value))}
                 placeholder="AIzaSy... (Paste Gemini API Key from Google AI Studio)"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 pr-20"
               />
@@ -107,6 +109,11 @@ export const SettingsView: React.FC = () => {
                 {showKey ? 'Hide' : 'Show'}
               </button>
             </div>
+            {geminiKey && !geminiKey.startsWith('AIzaSy') && (
+              <p className="text-[11px] text-amber-400">
+                Note: Google AI Studio API keys typically begin with &apos;AIzaSy...&apos;. Verify yours at aistudio.google.com/apikey.
+              </p>
+            )}
             {geminiKey && (
               <button
                 type="button"
