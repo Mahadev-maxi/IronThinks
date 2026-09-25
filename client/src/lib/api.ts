@@ -15,13 +15,30 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}): Promi
   }
 
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+    });
+  } catch (netErr: any) {
+    throw new Error(`Cannot reach backend API at ${url}. ${netErr.message}`);
+  }
 
-  const data = await response.json();
+  const rawText = await response.text();
+  let data: any = null;
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    data = { error: rawText || `HTTP ${response.status} ${response.statusText}` };
+  }
+
   if (!response.ok) {
+    if (response.status === 405) {
+      throw new Error(
+        `Backend API returned HTTP 405. If deployed on Vercel, set VITE_API_URL to your active backend server (e.g. Render, Railway, or Fly.io).`
+      );
+    }
     throw new Error(data.error || `HTTP error ${response.status}`);
   }
   return data;

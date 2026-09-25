@@ -18,25 +18,43 @@ export class PcmStreamPlayer {
   public async init(): Promise<void> {
     if (this.audioContext) {
       if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
+        try {
+          await this.audioContext.resume();
+        } catch (e) {
+          console.warn('[PcmStreamPlayer] Resume AudioContext warning:', e);
+        }
       }
       return;
     }
 
-    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    await this.audioContext.resume();
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) {
+      console.warn('[PcmStreamPlayer] AudioContext is not supported in this browser.');
+      return;
+    }
 
-    this.analyserNode = this.audioContext.createAnalyser();
-    this.analyserNode.fftSize = 512;
-    this.analyserNode.smoothingTimeConstant = 0.8;
+    try {
+      this.audioContext = new AudioContextClass();
+      if (this.audioContext && this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
 
-    this.gainNode = this.audioContext.createGain();
-    this.gainNode.gain.setValueAtTime(1.0, this.audioContext.currentTime);
+      if (this.audioContext) {
+        this.analyserNode = this.audioContext.createAnalyser();
+        this.analyserNode.fftSize = 512;
+        this.analyserNode.smoothingTimeConstant = 0.8;
 
-    this.gainNode.connect(this.analyserNode);
-    this.analyserNode.connect(this.audioContext.destination);
+        this.gainNode = this.audioContext.createGain();
+        this.gainNode.gain.setValueAtTime(1.0, this.audioContext.currentTime);
 
-    this.nextPlayTime = this.audioContext.currentTime;
+        this.gainNode.connect(this.analyserNode);
+        this.analyserNode.connect(this.audioContext.destination);
+
+        this.nextPlayTime = this.audioContext.currentTime;
+      }
+    } catch (e) {
+      console.warn('[PcmStreamPlayer] AudioContext creation deferred until user interaction:', e);
+    }
   }
 
   /**

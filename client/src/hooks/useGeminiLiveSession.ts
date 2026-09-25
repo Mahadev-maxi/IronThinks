@@ -110,9 +110,23 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
 
       // 3. Connect to Backend WebSocket
       const token = getStoredToken();
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.hostname === 'localhost' ? 'localhost:5000' : window.location.host;
-      const wsUrl = `${wsProtocol}//${wsHost}/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
+      let wsUrl = '';
+      const customWs = import.meta.env.VITE_WS_URL;
+      const customApi = import.meta.env.VITE_API_URL;
+
+      if (customWs) {
+        const baseWs = customWs.replace(/\/$/, '');
+        wsUrl = `${baseWs}/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
+      } else if (customApi) {
+        const cleanApi = customApi.replace(/\/$/, '');
+        const wsProto = cleanApi.startsWith('https') ? 'wss:' : 'ws:';
+        const wsHost = cleanApi.replace(/^https?:\/\//, '');
+        wsUrl = `${wsProto}//${wsHost}/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
+      } else {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.hostname === 'localhost' ? 'localhost:5000' : window.location.host;
+        wsUrl = `${wsProtocol}//${wsHost}/api/live-stream?sessionId=${sessionId}&personaId=${personaId}&voiceName=${voiceName}&mode=${mode}&token=${encodeURIComponent(token)}`;
+      }
 
       const socket = new WebSocket(wsUrl);
       wsRef.current = socket;
@@ -255,7 +269,11 @@ export function useGeminiLiveSession(options: UseGeminiLiveSessionOptions) {
       socket.onerror = (err) => {
         console.error('[LiveSession] WebSocket error:', err);
         setStatus('error');
-        setErrorMessage('Failed to connect to real-time voice stream.');
+        if (window.location.hostname.includes('vercel.app') && !import.meta.env.VITE_WS_URL && !import.meta.env.VITE_API_URL) {
+          setErrorMessage('Backend server connection required: Vercel hosts the frontend static UI. Please deploy the backend (Express + WebSockets) to Render or Railway and set VITE_API_URL / VITE_WS_URL in your Vercel Environment Variables.');
+        } else {
+          setErrorMessage('Failed to connect to real-time voice stream. Ensure your backend server is online and accessible.');
+        }
       };
 
       socket.onclose = () => {

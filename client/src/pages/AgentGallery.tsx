@@ -43,7 +43,7 @@ export const AgentGallery: React.FC = () => {
 
       navigate(`/session/${personaId}?sessionId=${result.sessionId}&mode=${selectedMode}&voice=${defaultVoice}`);
     } catch (err: any) {
-      console.error('Error starting session:', err);
+      console.warn('[AgentGallery] Backend session init notice:', err.message);
       // Fallback direct route
       const fallbackId = crypto.randomUUID();
       navigate(`/session/${personaId}?sessionId=${fallbackId}&mode=${selectedMode}&voice=${defaultVoice}`);
